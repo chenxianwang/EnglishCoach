@@ -25,7 +25,41 @@ machine; only the optional grammar check and pronunciation scoring call an API.
 
 ![Recording report](docs/screenshot-report.png)
 
-## Try it without installing anything
+## What's inside
+
+The app is a single dashboard with **15 training panels** organised around what
+you're working on:
+
+### Speaking
+| Panel | What it does |
+|---|---|
+| 📈 Summary & progress | improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
+| 📖 Practice stories | load a known reference text and practise the whole passage |
+| 📋 Speaking error log | grammar and word-choice mistakes aggregated across sessions |
+| 🗣️ Speaking vocabulary | how much distinct vocabulary you actually produce, growth over time, and the words you're recycling |
+| 📣 How-to: tricky words | step-by-step articulation guides for problem sounds |
+
+### Listening
+| Panel | What it does |
+|---|---|
+| 🎧 Listening — dictation | real recorded speech, you type what you heard; graded by word-level alignment |
+| 📋 Listening error log | the words you keep mishearing, ranked by frequency |
+| 🎧 Listening vocabulary | your receptive vocabulary size, derived from dictation results |
+| 🔉 Listening (ear training) | minimal-pair ear training — can you tell /ɪ/ from /iː/? |
+
+### Pronunciation fundamentals
+| Panel | What it does |
+|---|---|
+| 🎧 Sound system | the full English phoneme inventory with audio and examples |
+| 🗣️ 中→EN Pronunciation | Mandarin-L1 specific: the interference patterns you'll keep hitting |
+| 📇 Vocabulary & chunks | high-frequency words and fixed expressions to practise |
+| 🎭 Register | formal vs. informal, written vs. spoken — when to use which |
+| 📕 Vowels & consonants 101 | the basics of how English sounds are made |
+| 🧮 How scoring works | what each metric means and how the numbers are calculated |
+
+## Quick start
+
+### Try it without installing anything
 
 The demo renders a complete report from a built-in synthetic fixture — no
 models, no API keys, no audio:
@@ -38,11 +72,17 @@ open demo_report.html
 This is the **output** side only: a static file with the report, the progress
 view, and every training panel. Recording and analysis need the server, below.
 
-## Run the real thing
+### Run the real thing
 
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
-python english_coach_web.py          # http://localhost:8000
+
+# 2. Start the server
+python english_coach_web.py
+
+# 3. Open in your browser
+# http://localhost:8000
 ```
 
 Everything happens on one page. **➕ New analysis** opens the capture workflow:
@@ -67,6 +107,8 @@ Everything happens on one page. **➕ New analysis** opens the capture workflow:
 
 Results land in the dashboard alongside every previous session, the progress
 curve, and a drill list seeded from the words you actually got wrong.
+
+### API keys
 
 Keys are entered once in the UI and saved to `~/.english_coach.json`, outside
 the project directory. Nothing is committed. Environment variables
@@ -107,11 +149,13 @@ audio ─┬─> faster-whisper ──────> transcript ─┬─> LLM �
                                     no external assets, no framework)
 ```
 
+### Core files
+
 - **`english_coach.py`** — the engine. Transcription, scoring, LLM analysis, the
-  prosody analyzer, IPA lookup via CMUdict, and the dashboard generator with its
-  training panels.
-- **`english_coach_web.py`** — Flask app. Upload, transcribe, score, and serve
-  the dashboard; long jobs run on background threads and stream progress to the
+  prosody analyzer, IPA lookup via CMUdict, and the dashboard generator with
+  all 15 training panels.
+- **`english_coach_web.py`** — Flask app. Upload, transcribe, score, serve the
+  dashboard; long jobs run on background threads and stream progress to the
   browser by polling.
 - **`transcribe_service.py`** — a standalone, reusable sherpa-onnx STT
   microservice (HTTP + WebSocket, self-describing `/api` spec). Mounted into the
@@ -119,8 +163,17 @@ audio ─┬─> faster-whisper ──────> transcript ─┬─> LLM �
 - **`listening_import.py`** — builds the listening library: pulls authentic
   recorded speech from VOA, the Santa Barbara Corpus, Tatoeba or your own
   folder, and normalizes every source into one clip format.
-- **`sound_system.json`, `phonemes.json`, `mandarin_contrasts.json`** — drill
-  content for the training modules.
+- **`english_coach_gui.py`** — older Tkinter desktop version, kept for reference.
+
+### Data files
+
+| File | Purpose |
+|---|---|
+| `phonemes.json` | English phoneme inventory with examples and IPA |
+| `sound_system.json` | full sound system with audio references |
+| `mandarin_contrasts.json` | Mandarin-L1 specific pronunciation contrasts |
+| `daily_phrases.json` | high-frequency everyday phrases |
+| `Practice scripts/` | minimal-pair story texts for passage practice |
 
 ## Listening by dictation
 
@@ -147,6 +200,35 @@ sentence timings, so the importer recovers them by running Whisper for word
 timings and aligning that hypothesis against the official transcript — the
 clock comes from the audio, the words from the transcript, never from Whisper's
 mishearing.
+
+## Vocabulary tracking
+
+The app tracks vocabulary on both sides — what you produce when speaking, and
+what you perceive when listening — and can compare the two.
+
+### Speaking vocabulary
+
+`speaking_vocabulary()` aggregates across every recording you've made:
+- **Total distinct words** — the size of your active vocabulary
+- **Vocabulary growth** — new words added per session, plotted over time
+- **Recycled vs. new** — whether you're reaching for new words or reusing the same ones
+- **Frequency table** — the words you say most, and the ones you're letting slip
+
+Function words ("the", "and", etc.) are excluded from the count — everyone uses
+those constantly, so they carry no signal about your vocabulary range.
+
+### Listening vocabulary
+
+The listening side works the same way, but from the dictation results: every
+word you got right counts toward your receptive vocabulary. Run enough dictation
+sessions and you get a picture of how much English you can actually understand
+by ear, as opposed to how much you can produce.
+
+### Spoken vs. listened comparison
+
+Both panels include a toggle that overlays the two vocabularies — words you can
+say but not reliably hear, words you can recognise but don't produce yourself,
+and the overlap where both match.
 
 ## Design notes
 
@@ -187,27 +269,22 @@ value by looking at what follows it — a `,` only ends the string if a real tok
 comes after, which correctly keeps the comma inside `he said "hi", then`.
 
 Two cases defeat any local rule, and both showed up in production.
-
 A quote followed by a comma and then another quote is undecidable in isolation:
-
 ```
 "why": "he said "hi", "bye" loudly"      <- inner quotes
 "why": "he said hi", "next_key": "…"     <- a real close
 ```
-
 Left to right they are identical. What settles it is whether the *whole
 document* parses, so one repair enumerates the ambiguous sites and flips them —
 one at a time, then two — taking the first reading that yields valid JSON.
 
 Worse is a value that is never closed at all:
-
 ```json
 "evidence": [
   "captured" -> likely heard as 'capture',
   "missed"   -> likely heard as 'miss'
 ]
 ```
-
 Each element opens a string, emits a quote after the word, then continues in
 bare prose. No closing quote exists, so quote-pairing swallows the rest of the
 document and no amount of flipping recovers it. The fix anchors on structure
