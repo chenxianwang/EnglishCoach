@@ -1,0 +1,33 @@
+# English Coach — dependencies
+#
+#   pip install -r requirements.txt
+#
+# Nothing here is needed to see the app work: `python english_coach.py --demo`
+# renders a full sample report using only the standard library.
+
+# --- core: the web app itself -----------------------------------------------
+flask>=3.0
+cmudict>=1.0          # IPA transcription for practice words
+zhconv>=1.4           # Traditional -> Simplified Chinese for zh transcripts
+
+# --- batch transcription (Whisper) -----------------------------------------
+# Pulls in `av` (PyAV), which is also used for audio decoding and resampling,
+# so no system ffmpeg binary is required.
+faster-whisper>=1.0
+av>=11.0
+numpy>=1.24           # pure-NumPy prosody analyzer (pitch, rhythm, pace)
+
+# --- pronunciation scoring (Azure Speech) ----------------------------------
+# Optional. Without a key the app still runs; pronunciation scoring is skipped.
+azure-cognitiveservices-speech>=1.34
+
+# --- live transcription (sherpa-onnx, offline & on-device) -----------------
+# Optional. Without these the /v1/stream WebSocket route exists but reports
+# "model not loaded" instead of streaming.
+flask-sock>=0.7
+sherpa-onnx>=1.9
+
+# --- grammar analysis providers -------------------------------------------
+# DeepSeek is the default and needs NO package (it is called over stdlib
+# urllib). Install this only if you want to use Anthropic instead.
+# anthropic>=0.40

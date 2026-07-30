@@ -1,0 +1,591 @@
+[
+ {
+  "id": "v_ae",
+  "cat": "vowel",
+  "title": "/æ/ vs /e/ vs /ɜː/",
+  "words": [
+   [
+    "bad",
+    "/bæd/"
+   ],
+   [
+    "bed",
+    "/bed/"
+   ],
+   [
+    "bird",
+    "/bɜːd/"
+   ]
+  ],
+  "sets": [
+   [
+    "bad",
+    "bed",
+    "bird"
+   ]
+  ],
+  "explain": "Mandarin has no /æ/ and no /ɜː/. All three collapse toward one mid vowel, so bad / bed / bird sound nearly identical.",
+  "note": "Mandarin vowel space has no open front /æ/ nor central r-coloured /ɜː/.",
+  "root": 1
+ },
+ {
+  "id": "v_iy",
+  "cat": "vowel",
+  "title": "/iː/ vs /ɪ/",
+  "words": [
+   [
+    "seat",
+    "/siːt/"
+   ],
+   [
+    "sit",
+    "/sɪt/"
+   ]
+  ],
+  "sets": [
+   [
+    "seat",
+    "sit"
+   ],
+   [
+    "feel",
+    "fill"
+   ],
+   [
+    "beat",
+    "bit"
+   ],
+   [
+    "sheep",
+    "ship"
+   ]
+  ],
+  "explain": "Mandarin /i/ is one category. English splits it into tense /iː/ (long, tight) and lax /ɪ/ (short, relaxed).",
+  "note": "It's not just length — tongue position and tension differ too.",
+  "root": 1
+ },
+ {
+  "id": "v_uw",
+  "cat": "vowel",
+  "title": "/uː/ vs /ʊ/",
+  "words": [
+   [
+    "pool",
+    "/puːl/"
+   ],
+   [
+    "pull",
+    "/pʊl/"
+   ]
+  ],
+  "sets": [
+   [
+    "pool",
+    "pull"
+   ],
+   [
+    "fool",
+    "full"
+   ],
+   [
+    "Luke",
+    "look"
+   ]
+  ],
+  "explain": "Same tense/lax problem on the back vowels. /ʊ/ (the short, relaxed one) is usually the missing one.",
+  "note": "Parallel to the /iː/–/ɪ/ split.",
+  "root": 1
+ },
+ {
+  "id": "v_open",
+  "cat": "vowel",
+  "title": "/ʌ/ vs /ɑː/ vs /ɒ/",
+  "words": [
+   [
+    "cup",
+    "/kʌp/"
+   ],
+   [
+    "car",
+    "/kɑː/"
+   ],
+   [
+    "cot",
+    "/kɒt/"
+   ]
+  ],
+  "sets": [
+   [
+    "cup",
+    "cop"
+   ],
+   [
+    "luck",
+    "lock"
+   ],
+   [
+    "nut",
+    "not"
+   ]
+  ],
+  "explain": "Three distinct English vowels map onto roughly one region in Mandarin — frequently merged.",
+  "note": "Mandarin 'a' covers ground English splits three ways.",
+  "root": 1
+ },
+ {
+  "id": "v_schwa",
+  "cat": "vowel",
+  "title": "schwa /ə/",
+  "words": [
+   [
+    "about",
+    "/əˈbaʊt/"
+   ],
+   [
+    "banana",
+    "/bəˈnɑːnə/"
+   ]
+  ],
+  "sets": [],
+  "explain": "The most frequent vowel in English barely exists in Mandarin. Learners give every syllable a full, clear vowel instead of reducing unstressed ones to /ə/.",
+  "note": "Root cause of weak-form difficulty — see the Stress & Rhythm cards.",
+  "root": 3
+ },
+ {
+  "id": "c_th",
+  "cat": "consonant",
+  "title": "/θ/ and /ð/",
+  "words": [
+   [
+    "think",
+    "/θɪŋk/"
+   ],
+   [
+    "this",
+    "/ðɪs/"
+   ]
+  ],
+  "sets": [
+   [
+    "think",
+    "sink"
+   ],
+   [
+    "thin",
+    "sin"
+   ],
+   [
+    "mouth",
+    "mouse"
+   ]
+  ],
+  "explain": "Neither exists in Mandarin. Usually replaced: think→'sink' (/s/), this→'dis' (/d/ or /z/). The tongue-between-teeth gesture feels unnatural.",
+  "note": "No dental fricatives in Mandarin's inventory.",
+  "root": 1
+ },
+ {
+  "id": "c_v",
+  "cat": "consonant",
+  "title": "/v/ vs /w/",
+  "words": [
+   [
+    "very",
+    "/ˈveri/"
+   ],
+   [
+    "vine",
+    "/vaɪn/"
+   ],
+   [
+    "wine",
+    "/waɪn/"
+   ]
+  ],
+  "sets": [
+   [
+    "vine",
+    "wine"
+   ],
+   [
+    "vest",
+    "west"
+   ],
+   [
+    "veil",
+    "wail"
+   ],
+   [
+    "vary",
+    "wary"
+   ]
+  ],
+  "explain": "Standard Mandarin has no /v/. Replaced with /w/ (very→'wery') or /f/. This is exactly why 'I've' was hard — the final /v/ has no native template.",
+  "note": "Connects directly to the I've / I'll / I'm work.",
+  "root": 1
+ },
+ {
+  "id": "c_nl",
+  "cat": "consonant",
+  "title": "/n/ vs /l/",
+  "words": [
+   [
+    "night",
+    "/naɪt/"
+   ],
+   [
+    "light",
+    "/laɪt/"
+   ],
+   [
+    "need",
+    "/niːd/"
+   ],
+   [
+    "lead",
+    "/liːd/"
+   ]
+  ],
+  "sets": [
+   [
+    "night",
+    "light"
+   ],
+   [
+    "need",
+    "lead"
+   ],
+   [
+    "no",
+    "low"
+   ]
+  ],
+  "explain": "Many southern Mandarin dialects merge /n/ and /l/, so speakers from those regions may swap them in English too.",
+  "note": "Dialect-dependent; strong in 湖南, 四川, parts of 福建 etc.",
+  "root": 1
+ },
+ {
+  "id": "c_r",
+  "cat": "consonant",
+  "title": "English /r/",
+  "words": [
+   [
+    "red",
+    "/red/"
+   ],
+   [
+    "right",
+    "/raɪt/"
+   ],
+   [
+    "very",
+    "/ˈveri/"
+   ]
+  ],
+  "sets": [
+   [
+    "right",
+    "light"
+   ],
+   [
+    "red",
+    "led"
+   ],
+   [
+    "rice",
+    "lice"
+   ]
+  ],
+  "explain": "Mandarin's 'r' (日 sound) is a different gesture. English /r/ has no tongue contact and often colours the vowel (car, bird). Learners substitute the Mandarin retroflex.",
+  "note": "Different articulation + r-colouring of vowels is unfamiliar.",
+  "root": 1
+ },
+ {
+  "id": "f_stops",
+  "cat": "final",
+  "title": "Final stops /p t k b d g/",
+  "words": [
+   [
+    "bed → 'bed-uh'",
+    ""
+   ],
+   [
+    "map, cat, big",
+    ""
+   ]
+  ],
+  "sets": [],
+  "explain": "The single biggest structural problem. Mandarin syllables end only in a vowel, /n/, or /ŋ/. English final consonants get a vowel added (epenthesis): bed→'bedduh', map→'mappuh'.",
+  "note": "Why months, asked, I've all felt hard — Mandarin can't end a syllable that way.",
+  "root": 2
+ },
+ {
+  "id": "f_voice",
+  "cat": "final",
+  "title": "Voiced vs voiceless finals",
+  "words": [
+   [
+    "bad",
+    "/bæd/"
+   ],
+   [
+    "bat",
+    "/bæt/"
+   ]
+  ],
+  "sets": [
+   [
+    "bad",
+    "bat"
+   ],
+   [
+    "dog",
+    "dock"
+   ],
+   [
+    "bag",
+    "back"
+   ],
+   [
+    "seed",
+    "seat"
+   ]
+  ],
+  "explain": "Mandarin has no voiced/voiceless contrast at the end of a syllable. The key cue in English is actually vowel length (the vowel before /d/ is longer than before /t/) — a cue learners don't use.",
+  "note": "Listeners miss the contrast because they're listening for the wrong cue.",
+  "root": 2
+ },
+ {
+  "id": "f_cluster",
+  "cat": "final",
+  "title": "Consonant clusters",
+  "words": [
+   [
+    "street",
+    "/striːt/"
+   ],
+   [
+    "texts",
+    "/teksts/"
+   ],
+   [
+    "strengths",
+    "/streŋkθs/"
+   ]
+  ],
+  "sets": [],
+  "explain": "Mandarin has zero consonant clusters. English piles them up (str-, -ksts). Learners insert vowels to break them up: street→'si-tu-reet'.",
+  "note": "No native cluster template; epenthesis is the fallback.",
+  "root": 2
+ },
+ {
+  "id": "f_darkl",
+  "cat": "final",
+  "title": "Dark /l/ (word-final)",
+  "words": [
+   [
+    "ball",
+    "/bɔːl/"
+   ],
+   [
+    "feel",
+    "/fiːl/"
+   ],
+   [
+    "I'll",
+    "/aɪl/"
+   ]
+  ],
+  "sets": [],
+  "explain": "The 'dark' /l/ at the end of a word needs the tongue tip to land on the ridge. Often replaced by a vowel glide or dropped. This is the I'll problem.",
+  "note": "Tongue-tip contact, not just a glide.",
+  "root": 2
+ },
+ {
+  "id": "s_wordstress",
+  "cat": "stress",
+  "title": "Word stress",
+  "words": [
+   [
+    "RE-cord (n) vs re-CORD (v)",
+    ""
+   ],
+   [
+    "PHO-to-graph vs pho-TOG-ra-phy",
+    ""
+   ]
+  ],
+  "sets": [],
+  "explain": "English moves stress to change meaning or part of speech, and unstressed syllables reduce. Mandarin gives each syllable full weight, so learners stress evenly.",
+  "note": "Wrong stress is often less intelligible than a wrong vowel.",
+  "root": 3
+ },
+ {
+  "id": "s_rhythm",
+  "cat": "stress",
+  "title": "Stress-timing (rhythm)",
+  "words": [
+   [
+    "English: stress-timed",
+    ""
+   ],
+   [
+    "Mandarin: syllable-timed",
+    ""
+   ]
+  ],
+  "sets": [],
+  "explain": "English squeezes unstressed syllables to keep a steady beat on the stressed ones. Mandarin gives every syllable roughly equal time. This is the root of weak forms and connected speech.",
+  "note": "Why a-cup-of-tea compresses to 'uh-CUP-uh-tea' — and why it's hard.",
+  "root": 3
+ },
+ {
+  "id": "s_intonation",
+  "cat": "stress",
+  "title": "Sentence intonation",
+  "words": [
+   [
+    "rising vs falling tunes",
+    ""
+   ],
+   [
+    "Yes? ↗ vs Yes. ↘",
+    ""
+   ]
+  ],
+  "sets": [],
+  "explain": "Mandarin tones operate on single syllables; English intonation rises and falls across a whole phrase. The two systems interfere — learners may sound flat or place pitch movement oddly.",
+  "note": "Phrase-level melody vs syllable-level tone.",
+  "root": 3
+ },
+ {
+  "id": "s_tone",
+  "cat": "stress",
+  "title": "Tone interference",
+  "words": [
+   [
+    "mapping 1–4 tones onto English",
+    ""
+   ]
+  ],
+  "sets": [],
+  "explain": "Some learners unconsciously assign Mandarin tones to English syllables, producing a sing-song pattern that native English listeners hear as unusual emphasis.",
+  "note": "Carrying the native tone system onto the target language.",
+  "root": 3
+ },
+ {
+  "id": "f_ed",
+  "cat": "final",
+  "title": "-ed endings  /t/ /d/ /ɪd/",
+  "words": [
+   [
+    "walked",
+    "/wɔːkt/"
+   ],
+   [
+    "played",
+    "/pleɪd/"
+   ],
+   [
+    "wanted",
+    "/ˈwɒntɪd/"
+   ]
+  ],
+  "sets": [
+   [
+    "walk",
+    "walked"
+   ],
+   [
+    "play",
+    "played"
+   ],
+   [
+    "want",
+    "wanted"
+   ],
+   [
+    "miss",
+    "missed"
+   ]
+  ],
+  "explain": "Past -ed is one of three sounds, chosen by the sound before it: voiceless → /t/ (walked), voiced → /d/ (played), t or d → /ɪd/ (wanted). Mandarin speakers often drop it — both because Chinese marks the past with context/particles, not endings, AND because it adds a hard final consonant or cluster.",
+  "note": "Bridges grammar (tense) and root cause 2 (syllable endings). Hearing walk vs walked retrains the ear.",
+  "root": 2
+ },
+ {
+  "id": "f_s",
+  "cat": "final",
+  "title": "-s / -es endings  /s/ /z/ /ɪz/",
+  "words": [
+   [
+    "cats",
+    "/kæts/"
+   ],
+   [
+    "dogs",
+    "/dɒɡz/"
+   ],
+   [
+    "buses",
+    "/ˈbʌsɪz/"
+   ]
+  ],
+  "sets": [
+   [
+    "cat",
+    "cats"
+   ],
+   [
+    "dog",
+    "dogs"
+   ],
+   [
+    "bus",
+    "buses"
+   ],
+   [
+    "wish",
+    "wishes"
+   ]
+  ],
+  "explain": "Plural and 3rd-person -s is also three sounds: voiceless → /s/ (cats), voiced → /z/ (dogs), sibilant → /ɪz/ (buses). Dropped for the same two reasons as -ed: Mandarin marks neither number nor agreement, and the final consonant is hard to land.",
+  "note": "Same rule shape as -ed — drill them together.",
+  "root": 2
+ },
+ {
+  "id": "c_voice",
+  "cat": "consonant",
+  "title": "Voicing vs aspiration (p/b · t/d · k/g)",
+  "words": [
+   [
+    "pie",
+    "/paɪ/"
+   ],
+   [
+    "buy",
+    "/baɪ/"
+   ]
+  ],
+  "sets": [
+   [
+    "pie",
+    "buy"
+   ],
+   [
+    "time",
+    "dime"
+   ],
+   [
+    "coat",
+    "goat"
+   ],
+   [
+    "pen",
+    "Ben"
+   ]
+  ],
+  "explain": "Mandarin contrasts aspirated vs unaspirated; English contrasts voiced vs voiceless. The two systems don't line up, so word-initial p/b, t/d, k/g get confused.",
+  "note": "A perception problem like bed/bad — train the ear before the mouth.",
+  "root": 1
+ }
+]

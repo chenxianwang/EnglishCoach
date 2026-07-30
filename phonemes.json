@@ -1,0 +1,1892 @@
+[
+ {
+  "kind": "vowel",
+  "ipa": "/iː/",
+  "solo": "eee",
+  "word": "seat",
+  "options": [
+   "seat",
+   "sit",
+   "set"
+  ],
+  "sets": [
+   {
+    "word": "seat",
+    "options": [
+     "seat",
+     "sit",
+     "set"
+    ]
+   },
+   {
+    "word": "feel",
+    "options": [
+     "feel",
+     "fill",
+     "fell"
+    ]
+   },
+   {
+    "word": "beat",
+    "options": [
+     "beat",
+     "bit",
+     "bet"
+    ]
+   },
+   {
+    "word": "sheep",
+    "options": [
+     "sheep",
+     "ship",
+     "shape"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɪ/",
+  "solo": "ih",
+  "word": "sit",
+  "options": [
+   "sit",
+   "seat",
+   "set"
+  ],
+  "sets": [
+   {
+    "word": "sit",
+    "options": [
+     "sit",
+     "seat",
+     "set"
+    ]
+   },
+   {
+    "word": "fill",
+    "options": [
+     "fill",
+     "feel",
+     "fell"
+    ]
+   },
+   {
+    "word": "bit",
+    "options": [
+     "bit",
+     "beat",
+     "bet"
+    ]
+   },
+   {
+    "word": "ship",
+    "options": [
+     "ship",
+     "sheep"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/e/",
+  "solo": "eh",
+  "word": "bed",
+  "options": [
+   "bed",
+   "bad",
+   "bird"
+  ],
+  "sets": [
+   {
+    "word": "bed",
+    "options": [
+     "bed",
+     "bad",
+     "bird"
+    ]
+   },
+   {
+    "word": "set",
+    "options": [
+     "set",
+     "sat",
+     "sit"
+    ]
+   },
+   {
+    "word": "pen",
+    "options": [
+     "pen",
+     "pan",
+     "pin"
+    ]
+   },
+   {
+    "word": "head",
+    "options": [
+     "head",
+     "had",
+     "hid"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/æ/",
+  "solo": "aah",
+  "word": "cat",
+  "options": [
+   "cat",
+   "cut",
+   "cot"
+  ],
+  "sets": [
+   {
+    "word": "cat",
+    "options": [
+     "cat",
+     "cut",
+     "cot"
+    ]
+   },
+   {
+    "word": "bad",
+    "options": [
+     "bad",
+     "bed",
+     "bud"
+    ]
+   },
+   {
+    "word": "pan",
+    "options": [
+     "pan",
+     "pen",
+     "pin"
+    ]
+   },
+   {
+    "word": "had",
+    "options": [
+     "had",
+     "head",
+     "hid"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɑː/",
+  "solo": "aar",
+  "word": "car",
+  "options": [
+   "car",
+   "core",
+   "cur"
+  ],
+  "sets": [
+   {
+    "word": "car",
+    "options": [
+     "car",
+     "core",
+     "cur"
+    ]
+   },
+   {
+    "word": "heart",
+    "options": [
+     "heart",
+     "hurt",
+     "hat"
+    ]
+   },
+   {
+    "word": "hard",
+    "options": [
+     "hard",
+     "heard",
+     "had"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɒ/",
+  "solo": "awh",
+  "word": "cot",
+  "options": [
+   "cot",
+   "caught",
+   "cut"
+  ],
+  "sets": [
+   {
+    "word": "cot",
+    "options": [
+     "cot",
+     "caught",
+     "cut"
+    ]
+   },
+   {
+    "word": "pot",
+    "options": [
+     "pot",
+     "port",
+     "putt"
+    ]
+   },
+   {
+    "word": "lock",
+    "options": [
+     "lock",
+     "lark",
+     "luck"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɔː/",
+  "solo": "aww",
+  "word": "caught",
+  "options": [
+   "caught",
+   "cot",
+   "coat"
+  ],
+  "sets": [
+   {
+    "word": "caught",
+    "options": [
+     "caught",
+     "cot",
+     "coat"
+    ]
+   },
+   {
+    "word": "port",
+    "options": [
+     "port",
+     "pot",
+     "pat"
+    ]
+   },
+   {
+    "word": "born",
+    "options": [
+     "born",
+     "barn",
+     "bun"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ʊ/",
+  "solo": "uuh",
+  "word": "pull",
+  "options": [
+   "pull",
+   "pool",
+   "pill"
+  ],
+  "sets": [
+   {
+    "word": "pull",
+    "options": [
+     "pull",
+     "pool",
+     "pill"
+    ]
+   },
+   {
+    "word": "full",
+    "options": [
+     "full",
+     "fool",
+     "fill"
+    ]
+   },
+   {
+    "word": "look",
+    "options": [
+     "look",
+     "Luke",
+     "lock"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/uː/",
+  "solo": "oooo",
+  "word": "pool",
+  "options": [
+   "pool",
+   "pull",
+   "pole"
+  ],
+  "sets": [
+   {
+    "word": "pool",
+    "options": [
+     "pool",
+     "pull",
+     "pole"
+    ]
+   },
+   {
+    "word": "fool",
+    "options": [
+     "fool",
+     "full",
+     "foal"
+    ]
+   },
+   {
+    "word": "Luke",
+    "options": [
+     "Luke",
+     "look",
+     "lock"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ʌ/",
+  "solo": "uhh",
+  "word": "cup",
+  "options": [
+   "cup",
+   "cap",
+   "cop"
+  ],
+  "sets": [
+   {
+    "word": "cup",
+    "options": [
+     "cup",
+     "cap",
+     "cop"
+    ]
+   },
+   {
+    "word": "but",
+    "options": [
+     "but",
+     "bat",
+     "bought"
+    ]
+   },
+   {
+    "word": "luck",
+    "options": [
+     "luck",
+     "lack",
+     "lock"
+    ]
+   },
+   {
+    "word": "nut",
+    "options": [
+     "nut",
+     "not",
+     "net"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɜː/",
+  "solo": "urr",
+  "word": "bird",
+  "options": [
+   "bird",
+   "bed",
+   "bad"
+  ],
+  "sets": [
+   {
+    "word": "bird",
+    "options": [
+     "bird",
+     "bed",
+     "bad"
+    ]
+   },
+   {
+    "word": "hurt",
+    "options": [
+     "hurt",
+     "heart",
+     "hat"
+    ]
+   },
+   {
+    "word": "turn",
+    "options": [
+     "turn",
+     "ten",
+     "tan"
+    ]
+   },
+   {
+    "word": "word",
+    "options": [
+     "word",
+     "ward",
+     "wad"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ə/",
+  "solo": "uh",
+  "word": "about",
+  "options": [
+   "about",
+   "a boat",
+   "a bought"
+  ],
+  "sets": [
+   {
+    "word": "about",
+    "options": [
+     "about",
+     "a boat",
+     "a bought"
+    ]
+   },
+   {
+    "word": "support",
+    "options": [
+     "support",
+     "sport"
+    ]
+   },
+   {
+    "word": "banana",
+    "options": [
+     "banana"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/eɪ/",
+  "solo": "ayy",
+  "word": "day",
+  "options": [
+   "day",
+   "die",
+   "doe"
+  ],
+  "sets": [
+   {
+    "word": "day",
+    "options": [
+     "day",
+     "die",
+     "doe"
+    ]
+   },
+   {
+    "word": "late",
+    "options": [
+     "late",
+     "let",
+     "light"
+    ]
+   },
+   {
+    "word": "wait",
+    "options": [
+     "wait",
+     "wet",
+     "white"
+    ]
+   },
+   {
+    "word": "pain",
+    "options": [
+     "pain",
+     "pen",
+     "pine"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/aɪ/",
+  "solo": "eye",
+  "word": "my",
+  "options": [
+   "my",
+   "may",
+   "me"
+  ],
+  "sets": [
+   {
+    "word": "my",
+    "options": [
+     "my",
+     "may",
+     "me"
+    ]
+   },
+   {
+    "word": "light",
+    "options": [
+     "light",
+     "late",
+     "let"
+    ]
+   },
+   {
+    "word": "time",
+    "options": [
+     "time",
+     "tame",
+     "team"
+    ]
+   },
+   {
+    "word": "buy",
+    "options": [
+     "buy",
+     "bay",
+     "bee"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɔɪ/",
+  "solo": "oyy",
+  "word": "boy",
+  "options": [
+   "boy",
+   "buy",
+   "bay"
+  ],
+  "sets": [
+   {
+    "word": "boy",
+    "options": [
+     "boy",
+     "buy",
+     "bay"
+    ]
+   },
+   {
+    "word": "coin",
+    "options": [
+     "coin",
+     "cane",
+     "con"
+    ]
+   },
+   {
+    "word": "voice",
+    "options": [
+     "voice",
+     "vice",
+     "vase"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/aʊ/",
+  "solo": "oww",
+  "word": "now",
+  "options": [
+   "now",
+   "no",
+   "new"
+  ],
+  "sets": [
+   {
+    "word": "now",
+    "options": [
+     "now",
+     "no",
+     "new"
+    ]
+   },
+   {
+    "word": "house",
+    "options": [
+     "house",
+     "hose",
+     "whose"
+    ]
+   },
+   {
+    "word": "town",
+    "options": [
+     "town",
+     "tone",
+     "ton"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/əʊ/",
+  "solo": "ohh",
+  "word": "boat",
+  "options": [
+   "boat",
+   "bought",
+   "but"
+  ],
+  "sets": [
+   {
+    "word": "boat",
+    "options": [
+     "boat",
+     "bought",
+     "but"
+    ]
+   },
+   {
+    "word": "note",
+    "options": [
+     "note",
+     "not",
+     "nut"
+    ]
+   },
+   {
+    "word": "coat",
+    "options": [
+     "coat",
+     "caught",
+     "cot"
+    ]
+   },
+   {
+    "word": "phone",
+    "options": [
+     "phone",
+     "fawn",
+     "fun"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ɪə/",
+  "solo": "eer",
+  "word": "here",
+  "options": [
+   "here",
+   "hair",
+   "her"
+  ],
+  "sets": [
+   {
+    "word": "here",
+    "options": [
+     "here",
+     "hair",
+     "her"
+    ]
+   },
+   {
+    "word": "beer",
+    "options": [
+     "beer",
+     "bear",
+     "burr"
+    ]
+   },
+   {
+    "word": "ear",
+    "options": [
+     "ear",
+     "air",
+     "err"
+    ]
+   },
+   {
+    "word": "deer",
+    "options": [
+     "deer",
+     "dare",
+     "door"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/eə/",
+  "solo": "air",
+  "word": "hair",
+  "options": [
+   "hair",
+   "here",
+   "her"
+  ],
+  "sets": [
+   {
+    "word": "hair",
+    "options": [
+     "hair",
+     "here",
+     "her"
+    ]
+   },
+   {
+    "word": "bear",
+    "options": [
+     "bear",
+     "beer",
+     "burr"
+    ]
+   },
+   {
+    "word": "air",
+    "options": [
+     "air",
+     "ear",
+     "err"
+    ]
+   },
+   {
+    "word": "care",
+    "options": [
+     "care",
+     "core",
+     "cur"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "vowel",
+  "ipa": "/ʊə/",
+  "solo": "oor",
+  "word": "tour",
+  "options": [
+   "tour",
+   "tore",
+   "too"
+  ],
+  "sets": [
+   {
+    "word": "tour",
+    "options": [
+     "tour",
+     "tore",
+     "too"
+    ]
+   },
+   {
+    "word": "poor",
+    "options": [
+     "poor",
+     "pore",
+     "pooh"
+    ]
+   },
+   {
+    "word": "cure",
+    "options": [
+     "cure",
+     "core",
+     "coo"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/p/",
+  "solo": "puh",
+  "word": "pat",
+  "options": [
+   "pat",
+   "bat",
+   "mat"
+  ],
+  "sets": [
+   {
+    "word": "pat",
+    "options": [
+     "pat",
+     "bat",
+     "mat"
+    ]
+   },
+   {
+    "word": "pea",
+    "options": [
+     "pea",
+     "bee",
+     "tea"
+    ]
+   },
+   {
+    "word": "pin",
+    "options": [
+     "pin",
+     "bin",
+     "tin"
+    ]
+   },
+   {
+    "word": "pack",
+    "options": [
+     "pack",
+     "back",
+     "tack"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/b/",
+  "solo": "buh",
+  "word": "bat",
+  "options": [
+   "bat",
+   "pat",
+   "vat"
+  ],
+  "sets": [
+   {
+    "word": "bat",
+    "options": [
+     "bat",
+     "pat",
+     "vat"
+    ]
+   },
+   {
+    "word": "bee",
+    "options": [
+     "bee",
+     "pea",
+     "fee"
+    ]
+   },
+   {
+    "word": "bin",
+    "options": [
+     "bin",
+     "pin",
+     "fin"
+    ]
+   },
+   {
+    "word": "back",
+    "options": [
+     "back",
+     "pack",
+     "tack"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/t/",
+  "solo": "tuh",
+  "word": "tie",
+  "options": [
+   "tie",
+   "die",
+   "pie"
+  ],
+  "sets": [
+   {
+    "word": "tie",
+    "options": [
+     "tie",
+     "die",
+     "pie"
+    ]
+   },
+   {
+    "word": "ten",
+    "options": [
+     "ten",
+     "den",
+     "pen"
+    ]
+   },
+   {
+    "word": "time",
+    "options": [
+     "time",
+     "dime",
+     "mime"
+    ]
+   },
+   {
+    "word": "two",
+    "options": [
+     "two",
+     "do",
+     "zoo"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/d/",
+  "solo": "duh",
+  "word": "die",
+  "options": [
+   "die",
+   "tie",
+   "guy"
+  ],
+  "sets": [
+   {
+    "word": "die",
+    "options": [
+     "die",
+     "tie",
+     "guy"
+    ]
+   },
+   {
+    "word": "den",
+    "options": [
+     "den",
+     "ten",
+     "then"
+    ]
+   },
+   {
+    "word": "dime",
+    "options": [
+     "dime",
+     "time",
+     "dine"
+    ]
+   },
+   {
+    "word": "do",
+    "options": [
+     "do",
+     "to",
+     "zoo"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/k/",
+  "solo": "kuh",
+  "word": "cap",
+  "options": [
+   "cap",
+   "gap",
+   "tap"
+  ],
+  "sets": [
+   {
+    "word": "cap",
+    "options": [
+     "cap",
+     "gap",
+     "tap"
+    ]
+   },
+   {
+    "word": "coat",
+    "options": [
+     "coat",
+     "goat",
+     "boat"
+    ]
+   },
+   {
+    "word": "came",
+    "options": [
+     "came",
+     "game",
+     "name"
+    ]
+   },
+   {
+    "word": "back",
+    "options": [
+     "back",
+     "bag",
+     "bat"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/g/",
+  "solo": "guh",
+  "word": "gap",
+  "options": [
+   "gap",
+   "cap",
+   "gab"
+  ],
+  "sets": [
+   {
+    "word": "gap",
+    "options": [
+     "gap",
+     "cap",
+     "gab"
+    ]
+   },
+   {
+    "word": "goat",
+    "options": [
+     "goat",
+     "coat",
+     "boat"
+    ]
+   },
+   {
+    "word": "game",
+    "options": [
+     "game",
+     "came",
+     "name"
+    ]
+   },
+   {
+    "word": "bag",
+    "options": [
+     "bag",
+     "back",
+     "bad"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/f/",
+  "solo": "fff",
+  "word": "fan",
+  "options": [
+   "fan",
+   "van",
+   "pan"
+  ],
+  "sets": [
+   {
+    "word": "fan",
+    "options": [
+     "fan",
+     "van",
+     "pan"
+    ]
+   },
+   {
+    "word": "fee",
+    "options": [
+     "fee",
+     "vee",
+     "bee"
+    ]
+   },
+   {
+    "word": "fine",
+    "options": [
+     "fine",
+     "vine",
+     "wine"
+    ]
+   },
+   {
+    "word": "leaf",
+    "options": [
+     "leaf",
+     "leave",
+     "lead"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/v/",
+  "solo": "vvv",
+  "word": "van",
+  "options": [
+   "van",
+   "fan",
+   "ban"
+  ],
+  "sets": [
+   {
+    "word": "van",
+    "options": [
+     "van",
+     "fan",
+     "ban"
+    ]
+   },
+   {
+    "word": "vine",
+    "options": [
+     "vine",
+     "fine",
+     "wine"
+    ]
+   },
+   {
+    "word": "very",
+    "options": [
+     "very",
+     "ferry",
+     "wary"
+    ]
+   },
+   {
+    "word": "leave",
+    "options": [
+     "leave",
+     "leaf",
+     "lead"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/θ/",
+  "solo": "thh",
+  "word": "think",
+  "options": [
+   "think",
+   "sink",
+   "thing"
+  ],
+  "sets": [
+   {
+    "word": "think",
+    "options": [
+     "think",
+     "sink",
+     "thing"
+    ]
+   },
+   {
+    "word": "thin",
+    "options": [
+     "thin",
+     "sin",
+     "fin"
+    ]
+   },
+   {
+    "word": "three",
+    "options": [
+     "three",
+     "tree",
+     "free"
+    ]
+   },
+   {
+    "word": "mouth",
+    "options": [
+     "mouth",
+     "mouse"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/ð/",
+  "solo": "thur",
+  "word": "then",
+  "options": [
+   "then",
+   "den",
+   "zen"
+  ],
+  "sets": [
+   {
+    "word": "then",
+    "options": [
+     "then",
+     "den",
+     "zen"
+    ]
+   },
+   {
+    "word": "they",
+    "options": [
+     "they",
+     "day",
+     "jay"
+    ]
+   },
+   {
+    "word": "breathe",
+    "options": [
+     "breathe",
+     "breeze",
+     "breed"
+    ]
+   },
+   {
+    "word": "other",
+    "options": [
+     "other",
+     "udder"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/s/",
+  "solo": "sss",
+  "word": "sip",
+  "options": [
+   "sip",
+   "zip",
+   "ship"
+  ],
+  "sets": [
+   {
+    "word": "sip",
+    "options": [
+     "sip",
+     "zip",
+     "ship"
+    ]
+   },
+   {
+    "word": "sue",
+    "options": [
+     "sue",
+     "zoo",
+     "shoe"
+    ]
+   },
+   {
+    "word": "sink",
+    "options": [
+     "sink",
+     "think",
+     "zinc"
+    ]
+   },
+   {
+    "word": "bus",
+    "options": [
+     "bus",
+     "buzz"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/z/",
+  "solo": "zzz",
+  "word": "zip",
+  "options": [
+   "zip",
+   "sip",
+   "zap"
+  ],
+  "sets": [
+   {
+    "word": "zip",
+    "options": [
+     "zip",
+     "sip",
+     "zap"
+    ]
+   },
+   {
+    "word": "zoo",
+    "options": [
+     "zoo",
+     "sue",
+     "shoe"
+    ]
+   },
+   {
+    "word": "buzz",
+    "options": [
+     "buzz",
+     "bus",
+     "bud"
+    ]
+   },
+   {
+    "word": "prize",
+    "options": [
+     "prize",
+     "price"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/ʃ/",
+  "solo": "shh",
+  "word": "ship",
+  "options": [
+   "ship",
+   "chip",
+   "sip"
+  ],
+  "sets": [
+   {
+    "word": "ship",
+    "options": [
+     "ship",
+     "chip",
+     "sip"
+    ]
+   },
+   {
+    "word": "shoe",
+    "options": [
+     "shoe",
+     "chew",
+     "sue"
+    ]
+   },
+   {
+    "word": "sheet",
+    "options": [
+     "sheet",
+     "cheat",
+     "seat"
+    ]
+   },
+   {
+    "word": "wash",
+    "options": [
+     "wash",
+     "watch"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/ʒ/",
+  "solo": "zhuh",
+  "word": "vision",
+  "options": [
+   "vision",
+   "mission",
+   "wishing"
+  ],
+  "sets": [
+   {
+    "word": "vision",
+    "options": [
+     "vision",
+     "mission",
+     "wishing"
+    ]
+   },
+   {
+    "word": "measure",
+    "options": [
+     "measure",
+     "mesher",
+     "major"
+    ]
+   },
+   {
+    "word": "beige",
+    "options": [
+     "beige",
+     "bays"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/h/",
+  "solo": "huh",
+  "word": "hat",
+  "options": [
+   "hat",
+   "at",
+   "cat"
+  ],
+  "sets": [
+   {
+    "word": "hat",
+    "options": [
+     "hat",
+     "at",
+     "cat"
+    ]
+   },
+   {
+    "word": "heat",
+    "options": [
+     "heat",
+     "eat",
+     "seat"
+    ]
+   },
+   {
+    "word": "hair",
+    "options": [
+     "hair",
+     "air",
+     "care"
+    ]
+   },
+   {
+    "word": "hi",
+    "options": [
+     "hi",
+     "eye",
+     "pie"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/tʃ/",
+  "solo": "chuh",
+  "word": "chin",
+  "options": [
+   "chin",
+   "gin",
+   "shin"
+  ],
+  "sets": [
+   {
+    "word": "chin",
+    "options": [
+     "chin",
+     "gin",
+     "shin"
+    ]
+   },
+   {
+    "word": "cheap",
+    "options": [
+     "cheap",
+     "jeep",
+     "sheep"
+    ]
+   },
+   {
+    "word": "watch",
+    "options": [
+     "watch",
+     "wash",
+     "wadge"
+    ]
+   },
+   {
+    "word": "chair",
+    "options": [
+     "chair",
+     "share",
+     "hair"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/dʒ/",
+  "solo": "juh",
+  "word": "jump",
+  "options": [
+   "jump",
+   "chump",
+   "bump"
+  ],
+  "sets": [
+   {
+    "word": "jump",
+    "options": [
+     "jump",
+     "chump",
+     "bump"
+    ]
+   },
+   {
+    "word": "jeep",
+    "options": [
+     "jeep",
+     "cheap",
+     "sheep"
+    ]
+   },
+   {
+    "word": "gin",
+    "options": [
+     "gin",
+     "chin",
+     "shin"
+    ]
+   },
+   {
+    "word": "joke",
+    "options": [
+     "joke",
+     "choke",
+     "yoke"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/m/",
+  "solo": "mmm",
+  "word": "map",
+  "options": [
+   "map",
+   "nap",
+   "cap"
+  ],
+  "sets": [
+   {
+    "word": "map",
+    "options": [
+     "map",
+     "nap",
+     "cap"
+    ]
+   },
+   {
+    "word": "me",
+    "options": [
+     "me",
+     "knee",
+     "bee"
+    ]
+   },
+   {
+    "word": "sum",
+    "options": [
+     "sum",
+     "sun",
+     "sung"
+    ]
+   },
+   {
+    "word": "mail",
+    "options": [
+     "mail",
+     "nail",
+     "pale"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/n/",
+  "solo": "nnn",
+  "word": "nap",
+  "options": [
+   "nap",
+   "map",
+   "lap"
+  ],
+  "sets": [
+   {
+    "word": "nap",
+    "options": [
+     "nap",
+     "map",
+     "lap"
+    ]
+   },
+   {
+    "word": "knee",
+    "options": [
+     "knee",
+     "me",
+     "key"
+    ]
+   },
+   {
+    "word": "sun",
+    "options": [
+     "sun",
+     "sum",
+     "sung"
+    ]
+   },
+   {
+    "word": "nail",
+    "options": [
+     "nail",
+     "mail",
+     "pale"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/ŋ/",
+  "solo": "ung",
+  "word": "sing",
+  "options": [
+   "sing",
+   "sin",
+   "sink"
+  ],
+  "sets": [
+   {
+    "word": "sing",
+    "options": [
+     "sing",
+     "sin",
+     "sink"
+    ]
+   },
+   {
+    "word": "ring",
+    "options": [
+     "ring",
+     "rim",
+     "rink"
+    ]
+   },
+   {
+    "word": "sung",
+    "options": [
+     "sung",
+     "sun",
+     "sum"
+    ]
+   },
+   {
+    "word": "thing",
+    "options": [
+     "thing",
+     "thin",
+     "think"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/l/",
+  "solo": "lll",
+  "word": "light",
+  "options": [
+   "light",
+   "right",
+   "night"
+  ],
+  "sets": [
+   {
+    "word": "light",
+    "options": [
+     "light",
+     "right",
+     "night"
+    ]
+   },
+   {
+    "word": "lead",
+    "options": [
+     "lead",
+     "read",
+     "need"
+    ]
+   },
+   {
+    "word": "lock",
+    "options": [
+     "lock",
+     "rock",
+     "knock"
+    ]
+   },
+   {
+    "word": "lip",
+    "options": [
+     "lip",
+     "rip",
+     "nip"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/r/",
+  "solo": "rrr",
+  "word": "right",
+  "options": [
+   "right",
+   "light",
+   "white"
+  ],
+  "sets": [
+   {
+    "word": "right",
+    "options": [
+     "right",
+     "light",
+     "white"
+    ]
+   },
+   {
+    "word": "read",
+    "options": [
+     "read",
+     "lead",
+     "need"
+    ]
+   },
+   {
+    "word": "rock",
+    "options": [
+     "rock",
+     "lock",
+     "knock"
+    ]
+   },
+   {
+    "word": "rip",
+    "options": [
+     "rip",
+     "lip",
+     "nip"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/w/",
+  "solo": "wuh",
+  "word": "wet",
+  "options": [
+   "wet",
+   "vet",
+   "yet"
+  ],
+  "sets": [
+   {
+    "word": "wet",
+    "options": [
+     "wet",
+     "vet",
+     "yet"
+    ]
+   },
+   {
+    "word": "west",
+    "options": [
+     "west",
+     "vest",
+     "best"
+    ]
+   },
+   {
+    "word": "wine",
+    "options": [
+     "wine",
+     "vine",
+     "nine"
+    ]
+   },
+   {
+    "word": "we",
+    "options": [
+     "we",
+     "ye",
+     "vee"
+    ]
+   }
+  ]
+ },
+ {
+  "kind": "consonant",
+  "ipa": "/j/",
+  "solo": "yuh",
+  "word": "yet",
+  "options": [
+   "yet",
+   "wet",
+   "jet"
+  ],
+  "sets": [
+   {
+    "word": "yet",
+    "options": [
+     "yet",
+     "wet",
+     "jet"
+    ]
+   },
+   {
+    "word": "year",
+    "options": [
+     "year",
+     "ear",
+     "jeer"
+    ]
+   },
+   {
+    "word": "yell",
+    "options": [
+     "yell",
+     "well",
+     "jell"
+    ]
+   },
+   {
+    "word": "yolk",
+    "options": [
+     "yolk",
+     "joke",
+     "woke"
+    ]
+   }
+  ]
+ }
+]

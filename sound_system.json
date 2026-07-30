@@ -1,0 +1,1229 @@
+[
+ {
+  "id": "link_001",
+  "category": "greet",
+  "categoryLabel": "打招呼",
+  "written": "how are you",
+  "soundsLike": "how-wa-ree-you",
+  "example": "How are you? → how-wa-ree-you?",
+  "note": "are 弱读，you 连入",
+  "type": "linking"
+ },
+ {
+  "id": "link_002",
+  "category": "greet",
+  "categoryLabel": "打招呼",
+  "written": "nice to meet you",
+  "soundsLike": "nai-stu-mee-choo",
+  "example": "Nice to meet you → nai-stu-mee-choo",
+  "note": "to 弱读成 /tə/，meet you 同化连读 (meetcha)",
+  "type": "linking"
+ },
+ {
+  "id": "link_003",
+  "category": "greet",
+  "categoryLabel": "打招呼",
+  "written": "good to see you",
+  "soundsLike": "gu-dtu-see-you",
+  "example": "Good to see you → gu-dtu-see-you",
+  "note": "good 的 d 与 to 连读",
+  "type": "linking"
+ },
+ {
+  "id": "link_004",
+  "category": "greet",
+  "categoryLabel": "打招呼",
+  "written": "talk to you later",
+  "soundsLike": "taw-ktu-ya-lay-der",
+  "example": "Talk to you later → taw-ktu-ya-lay-der",
+  "note": "later 的 t 美式弹舌成 /d/",
+  "type": "linking"
+ },
+ {
+  "id": "link_005",
+  "category": "greet",
+  "categoryLabel": "打招呼",
+  "written": "take care",
+  "soundsLike": "tay-kkare",
+  "example": "Take care → tay-kkare",
+  "note": "take 的 k 直接连入 care",
+  "type": "linking"
+ },
+ {
+  "id": "link_006",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "I know",
+  "soundsLike": "I-no",
+  "example": "I know → I-no",
+  "note": "know 的 /kn/ 中 k 不发音",
+  "type": "linking"
+ },
+ {
+  "id": "link_007",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "of course",
+  "soundsLike": "uh-corse",
+  "example": "Of course → uh-corse",
+  "note": "of 弱读成 /ə/",
+  "type": "linking"
+ },
+ {
+  "id": "link_008",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "that's all right",
+  "soundsLike": "tha-tsall-right",
+  "example": "That's all right → tha-tsall-right",
+  "note": "that's 末尾 s 连入 all",
+  "type": "linking"
+ },
+ {
+  "id": "link_009",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "not at all",
+  "soundsLike": "no-da-tall",
+  "example": "Not at all → no-da-tall",
+  "note": "not 的 t 弱化弹舌，at all 连读",
+  "type": "linking"
+ },
+ {
+  "id": "link_010",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "kind of / sort of",
+  "soundsLike": "kinda / sorta",
+  "example": "It's kind of weird → it's kinda weird",
+  "note": "of 弱化后整体缩合",
+  "type": "linking"
+ },
+ {
+  "id": "link_011",
+  "category": "agree",
+  "categoryLabel": "回应/同意",
+  "written": "I see",
+  "soundsLike": "ai-see",
+  "example": "I see → ai-see",
+  "note": "短促连读，无间隔",
+  "type": "linking"
+ },
+ {
+  "id": "link_012",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "what are you doing",
+  "soundsLike": "wha-dar-ya-doo-in",
+  "example": "What are you doing? → wha-dar-ya-doo-in?",
+  "note": "are you → arya，doing 末尾 g 吞掉",
+  "type": "linking"
+ },
+ {
+  "id": "link_013",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "how do you know",
+  "soundsLike": "how-dya-know",
+  "example": "How do you know? → how-dya-know?",
+  "note": "do you → dya",
+  "type": "linking"
+ },
+ {
+  "id": "link_014",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "did you",
+  "soundsLike": "di-joo",
+  "example": "Did you eat? → didjoo eat?",
+  "note": "d+y 同化成 /dʒ/",
+  "type": "linking"
+ },
+ {
+  "id": "link_015",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "do you want to",
+  "soundsLike": "dya-wanna",
+  "example": "Do you want to go? → dya wanna go?",
+  "note": "want to 缩合成 wanna",
+  "type": "linking"
+ },
+ {
+  "id": "link_016",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "what do you think",
+  "soundsLike": "wha-dya-think",
+  "example": "What do you think? → wha-dya-think?",
+  "note": "do you → dya",
+  "type": "linking"
+ },
+ {
+  "id": "link_017",
+  "category": "ask",
+  "categoryLabel": "提问",
+  "written": "have you ever",
+  "soundsLike": "hav-you-ever",
+  "example": "Have you ever been there? → hav-you-ever been there?",
+  "note": "have 的 h 保留但弱读",
+  "type": "linking"
+ },
+ {
+  "id": "link_018",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "pick it up",
+  "soundsLike": "pi-ki-dup",
+  "example": "Pick it up → pi-ki-dup",
+  "note": "三词连成一串，辅音连元音典型例",
+  "type": "linking"
+ },
+ {
+  "id": "link_019",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "turn it off",
+  "soundsLike": "tur-ni-toff",
+  "example": "Turn it off → tur-ni-toff",
+  "note": "每个词都连读",
+  "type": "linking"
+ },
+ {
+  "id": "link_020",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "let me",
+  "soundsLike": "lem-me",
+  "example": "Let me know → lemme know",
+  "note": "let 的 t 同化进 me",
+  "type": "linking"
+ },
+ {
+  "id": "link_021",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "give me",
+  "soundsLike": "gim-me",
+  "example": "Give me that → gimme that",
+  "note": "give 的 v 弱化连入 me",
+  "type": "linking"
+ },
+ {
+  "id": "link_022",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "come on",
+  "soundsLike": "c'mon",
+  "example": "Come on! → c'mon!",
+  "note": "高度缩合，两音节变一个",
+  "type": "linking"
+ },
+ {
+  "id": "link_023",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "go ahead",
+  "soundsLike": "go-wuh-hed",
+  "example": "Go ahead → go-wuh-hed",
+  "note": "go 的元音尾连入 ahead",
+  "type": "linking"
+ },
+ {
+  "id": "link_024",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "take it easy",
+  "soundsLike": "tay-ki-tee-zy",
+  "example": "Take it easy → tay-ki-tee-zy",
+  "note": "take it 连读，easy 的 s 弱化",
+  "type": "linking"
+ },
+ {
+  "id": "link_025",
+  "category": "action",
+  "categoryLabel": "动作/建议",
+  "written": "get out of here",
+  "soundsLike": "ge-dou-duh-here",
+  "example": "Get out of here! → ge-dou-duh-here!",
+  "note": "get 的 t 弹舌，out of 弱化",
+  "type": "linking"
+ },
+ {
+  "id": "link_026",
+  "category": "filler",
+  "categoryLabel": "过渡/口头禅",
+  "written": "you know",
+  "soundsLike": "ya-know",
+  "example": "You know, it's fine → ya-know, it's fine",
+  "note": "you 弱读成 ya",
+  "type": "linking"
+ },
+ {
+  "id": "link_027",
+  "category": "filler",
+  "categoryLabel": "过渡/口头禅",
+  "written": "I mean",
+  "soundsLike": "ai-mean",
+  "example": "I mean, why not? → ai-mean, why not?",
+  "note": "用于解释或纠正自己",
+  "type": "linking"
+ },
+ {
+  "id": "link_028",
+  "category": "filler",
+  "categoryLabel": "过渡/口头禅",
+  "written": "a lot of",
+  "soundsLike": "a-la-duh",
+  "example": "A lot of time → a-la-duh time",
+  "note": "lot of 中 t 弹舌，of 弱化",
+  "type": "linking"
+ },
+ {
+  "id": "link_029",
+  "category": "filler",
+  "categoryLabel": "过渡/口头禅",
+  "written": "what about",
+  "soundsLike": "wha-dabout",
+  "example": "What about this? → wha-dabout this?",
+  "note": "what 的 t 连入 about",
+  "type": "linking"
+ },
+ {
+  "id": "link_030",
+  "category": "filler",
+  "categoryLabel": "过渡/口头禅",
+  "written": "think about it",
+  "soundsLike": "think-uh-bow-dit",
+  "example": "Think about it → think-uh-bow-dit",
+  "note": "about it 连成一串",
+  "type": "linking"
+ },
+ {
+  "id": "weak_001",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "can",
+  "soundsLike": "/kən/",
+  "example": "I can do it → I k'n do it",
+  "note": "强读 /kæn/ 只用于句尾或强调",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_002",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "have / has / had",
+  "soundsLike": "/həv/ /həz/ /həd/",
+  "example": "I have been there → I've been there",
+  "note": "h 经常消失",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_003",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "will",
+  "soundsLike": "/wəl/, 'll",
+  "example": "It will be fine → it'll be fine",
+  "note": "连在代词后几乎都缩写",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_004",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "would / could / should",
+  "soundsLike": "/wəd/ /kəd/ /ʃəd/",
+  "example": "You should have called → you shoulda called",
+  "note": "should/would/could have 缩成 shoulda/woulda/coulda",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_005",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "am / is / are",
+  "soundsLike": "/əm/ /s/ /ər/",
+  "example": "What are you doing → wha-dar-ya doin'",
+  "note": "are 弱读到几乎只剩 /ər/",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_006",
+  "category": "aux",
+  "categoryLabel": "助动词",
+  "written": "do / does",
+  "soundsLike": "/də/ /dəz/",
+  "example": "How do you know → how d'ya know",
+  "note": "do you 同化成 /djə/ → dya",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_007",
+  "category": "prep",
+  "categoryLabel": "介词",
+  "written": "to",
+  "soundsLike": "/tə/",
+  "example": "going to → gonna / want to → wanna",
+  "note": "几乎永远弱读",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_008",
+  "category": "prep",
+  "categoryLabel": "介词",
+  "written": "for",
+  "soundsLike": "/fər/",
+  "example": "I waited for an hour → I waited f'r an hour",
+  "note": "for a/an 连读后几乎听不出 for",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_009",
+  "category": "prep",
+  "categoryLabel": "介词",
+  "written": "of",
+  "soundsLike": "/əv/ or /ə/",
+  "example": "a cup of tea → a cup-uh tea",
+  "note": "最容易被完全吞掉的词",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_010",
+  "category": "prep",
+  "categoryLabel": "介词",
+  "written": "at / in / on",
+  "soundsLike": "/ət/ /ɪn/ /ən/",
+  "example": "I'll be at the office → I'll be-ət-the office",
+  "note": "弱读后与前词连读",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_011",
+  "category": "prep",
+  "categoryLabel": "介词",
+  "written": "from",
+  "soundsLike": "/frəm/",
+  "example": "Where are you from → where-ra-ya-frəm",
+  "note": "",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_012",
+  "category": "pron",
+  "categoryLabel": "代词",
+  "written": "him",
+  "soundsLike": "/ɪm/",
+  "example": "Tell him → tell-im",
+  "note": "h 在非重读位置几乎总是消失",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_013",
+  "category": "pron",
+  "categoryLabel": "代词",
+  "written": "her",
+  "soundsLike": "/ər/",
+  "example": "Give her the book → give-er-the-book",
+  "note": "",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_014",
+  "category": "pron",
+  "categoryLabel": "代词",
+  "written": "them",
+  "soundsLike": "/ðəm/ or 'em",
+  "example": "I told them → I told-'em",
+  "note": "非正式口语中 th 常消失",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_015",
+  "category": "pron",
+  "categoryLabel": "代词",
+  "written": "you",
+  "soundsLike": "/jə/ or /yə/",
+  "example": "Did you eat → di-djoo-eat",
+  "note": "在助动词后弱读并同化",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_016",
+  "category": "pron",
+  "categoryLabel": "代词",
+  "written": "he / she / we / they",
+  "soundsLike": "/i/ /ʃi/ /wi/ /ðei/",
+  "example": "What does he want → wha-diz-ee-want",
+  "note": "he 的 h 常消失",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_017",
+  "category": "conj",
+  "categoryLabel": "连词",
+  "written": "and",
+  "soundsLike": "/ənd/ /ən/ /n/",
+  "example": "fish and chips → fish'n chips",
+  "note": "三种弱化程度都常见",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_018",
+  "category": "conj",
+  "categoryLabel": "连词",
+  "written": "but",
+  "soundsLike": "/bət/",
+  "example": "I want to but I can't → I wanna b't I can't",
+  "note": "",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_019",
+  "category": "conj",
+  "categoryLabel": "连词",
+  "written": "or",
+  "soundsLike": "/ər/",
+  "example": "tea or coffee → tea-er-coffee",
+  "note": "弱读后与 her 弱读形式相同",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_020",
+  "category": "conj",
+  "categoryLabel": "连词",
+  "written": "that (连词)",
+  "soundsLike": "/ðət/",
+  "example": "I think that it's fine → I think th't it's fine",
+  "note": "作连词时几乎总是弱读",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_021",
+  "category": "art",
+  "categoryLabel": "冠词",
+  "written": "a / an",
+  "soundsLike": "/ə/ /ən/",
+  "example": "I need a minute → I need-uh-minute",
+  "note": "只有拼读字母时才读 /eɪ/",
+  "type": "weak_form"
+ },
+ {
+  "id": "weak_022",
+  "category": "art",
+  "categoryLabel": "冠词",
+  "written": "the",
+  "soundsLike": "/ðə/",
+  "example": "Pass me the salt → pass-me-thuh-salt",
+  "note": "元音前读 /ði/，辅音前读 /ðə/",
+  "type": "weak_form"
+ },
+ {
+  "id": "elis_001",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "last night",
+  "soundsLike": "las' night",
+  "example": "I was out last night → I was out las' night",
+  "note": "-st 后接辅音，t 脱落",
+  "type": "elision"
+ },
+ {
+  "id": "elis_002",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "just now",
+  "soundsLike": "jus' now",
+  "example": "He left just now → he left jus' now",
+  "note": "just/must/next/rest 同理",
+  "type": "elision"
+ },
+ {
+  "id": "elis_003",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "next door",
+  "soundsLike": "nex' door",
+  "example": "The people next door → the people nex' door",
+  "note": "辅音群中 t 最易消失",
+  "type": "elision"
+ },
+ {
+  "id": "elis_004",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "most people",
+  "soundsLike": "mos' people",
+  "example": "Most people don't know → mos' people don't know",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_005",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "I don't know",
+  "soundsLike": "I dunno",
+  "example": "I don't know → I dunno",
+  "note": "整体缩合，极高频",
+  "type": "elision"
+ },
+ {
+  "id": "elis_006",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "want to",
+  "soundsLike": "wanna",
+  "example": "I want to go → I wanna go",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_007",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "got to",
+  "soundsLike": "gotta",
+  "example": "I've got to leave → I gotta leave",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_008",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "what time",
+  "soundsLike": "wha' time",
+  "example": "What time is it → wha' time is it",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_009",
+  "category": "t_drop",
+  "categoryLabel": "/t/ 省略",
+  "written": "not at all",
+  "soundsLike": "no-da-tall",
+  "example": "Not at all → no-da-tall",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_010",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "and",
+  "soundsLike": "an' / 'n'",
+  "example": "bread and butter → bread'n butter",
+  "note": "d 在辅音前几乎总消失",
+  "type": "elision"
+ },
+ {
+  "id": "elis_011",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "old friend",
+  "soundsLike": "ol' friend",
+  "example": "An old friend of mine → an ol' friend",
+  "note": "-ld 后接辅音脱落；cold/bold/hold 同理",
+  "type": "elision"
+ },
+ {
+  "id": "elis_012",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "find out",
+  "soundsLike": "fin' out",
+  "example": "I need to find out → I need to fin' out",
+  "note": "-nd 后接辅音脱落",
+  "type": "elision"
+ },
+ {
+  "id": "elis_013",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "good morning",
+  "soundsLike": "g'morning",
+  "example": "Good morning → g'morning",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_014",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "would've / could've",
+  "soundsLike": "woulda / coulda",
+  "example": "I would've gone → I woulda gone",
+  "note": "d+have 融合后 h 消失",
+  "type": "elision"
+ },
+ {
+  "id": "elis_015",
+  "category": "d_drop",
+  "categoryLabel": "/d/ 省略",
+  "written": "used to",
+  "soundsLike": "usta",
+  "example": "I used to live there → I usta live there",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_016",
+  "category": "h_drop",
+  "categoryLabel": "/h/ 省略",
+  "written": "tell him",
+  "soundsLike": "tell-im",
+  "example": "Tell him I called → tell-im I called",
+  "note": "him → 'im, his → 'iz",
+  "type": "elision"
+ },
+ {
+  "id": "elis_017",
+  "category": "h_drop",
+  "categoryLabel": "/h/ 省略",
+  "written": "give her",
+  "soundsLike": "give-er",
+  "example": "Give her the keys → give-er the keys",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_018",
+  "category": "h_drop",
+  "categoryLabel": "/h/ 省略",
+  "written": "ask him / show her",
+  "soundsLike": "ask-im / show-er",
+  "example": "Did you ask him → didjoo ask-im",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_019",
+  "category": "h_drop",
+  "categoryLabel": "/h/ 省略",
+  "written": "have you",
+  "soundsLike": "'ave you",
+  "example": "Have you eaten → 'ave you eaten",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_020",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "going to",
+  "soundsLike": "gonna",
+  "example": "I'm going to call him → I'm gonna call him",
+  "note": "最高频缩合之一",
+  "type": "elision"
+ },
+ {
+  "id": "elis_021",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "kind of",
+  "soundsLike": "kinda",
+  "example": "It's kind of weird → it's kinda weird",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_022",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "out of",
+  "soundsLike": "outta",
+  "example": "Get out of here → get outta here",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_023",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "a lot of",
+  "soundsLike": "a lotta",
+  "example": "There's a lot of work → there's a lotta work",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_024",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "supposed to",
+  "soundsLike": "sposta",
+  "example": "You're supposed to call → you're sposta call",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_025",
+  "category": "syllable",
+  "categoryLabel": "音节缩合",
+  "written": "I don't know about that",
+  "soundsLike": "I dunno 'bout that",
+  "example": "多个省音叠加",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_026",
+  "category": "ing_drop",
+  "categoryLabel": "-ing 末音",
+  "written": "going / doing / saying",
+  "soundsLike": "/-ɪn/",
+  "example": "What are you doing → what are ya doin'",
+  "note": "-ing 末尾 /g/ 几乎总省略",
+  "type": "elision"
+ },
+ {
+  "id": "elis_027",
+  "category": "ing_drop",
+  "categoryLabel": "-ing 末音",
+  "written": "something / nothing",
+  "soundsLike": "somethin' / nothin'",
+  "example": "It's nothing → it's nothin'",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "elis_028",
+  "category": "ing_drop",
+  "categoryLabel": "-ing 末音",
+  "written": "talking / working / trying",
+  "soundsLike": "talkin' / workin' / tryin'",
+  "example": "I'm working on it → I'm workin' on it",
+  "note": "",
+  "type": "elision"
+ },
+ {
+  "id": "assim_001",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "don't you",
+  "soundsLike": "don'chu",
+  "example": "Don't you know? → don'chu know?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_002",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "won't you",
+  "soundsLike": "won'chu",
+  "example": "Won't you come in? → won'chu come in?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_003",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "want you",
+  "soundsLike": "wanchu",
+  "example": "I want you to stay → I wanchu to stay",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_004",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "let you",
+  "soundsLike": "letchu",
+  "example": "I'll let you know → I'll letchu know",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_005",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "bet you",
+  "soundsLike": "betchu",
+  "example": "I bet you didn't know → I betchu didn't know",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_006",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "meet you",
+  "soundsLike": "meetchu",
+  "example": "Nice to meet you → nice to meetchu",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_007",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "not yet",
+  "soundsLike": "no'chet",
+  "example": "Not yet → no'chet",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_008",
+  "category": "ty",
+  "categoryLabel": "t+y → ch",
+  "written": "right you are",
+  "soundsLike": "richu are",
+  "example": "Right you are → richu are",
+  "note": "英式口语较常见",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_009",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "did you",
+  "soundsLike": "didjoo",
+  "example": "Did you eat? → didjoo eat?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_010",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "would you",
+  "soundsLike": "wudjoo",
+  "example": "Would you like some? → wudjoo like some?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_011",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "could you",
+  "soundsLike": "cudjoo",
+  "example": "Could you help me? → cudjoo help me?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_012",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "should you",
+  "soundsLike": "shudjoo",
+  "example": "Should you decide to go → shudjoo decide to go",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_013",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "had you",
+  "soundsLike": "hadjoo",
+  "example": "Had you known → hadjoo known",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_014",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "need you",
+  "soundsLike": "needjoo",
+  "example": "I need you here → I needjoo here",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_015",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "told you",
+  "soundsLike": "toldjoo",
+  "example": "I told you so → I toldjoo so",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_016",
+  "category": "dy",
+  "categoryLabel": "d+y → j",
+  "written": "made you",
+  "soundsLike": "meidjoo",
+  "example": "What made you think that? → what meidjoo think that?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_017",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "miss you",
+  "soundsLike": "mishoo",
+  "example": "I miss you → I mishoo",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_018",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "this year",
+  "soundsLike": "thissheer",
+  "example": "This year has been rough → thissheer has been rough",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_019",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "last year",
+  "soundsLike": "lash year",
+  "example": "Last year I was in Paris → lash year I was in Paris",
+  "note": "-st 的 t 省略后 s 再与 y 同化",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_020",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "dress yourself",
+  "soundsLike": "dresh-yourself",
+  "example": "Dress yourself → dresh-yourself",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_021",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "bless you",
+  "soundsLike": "bleshoo",
+  "example": "Bless you! → bleshoo!",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_022",
+  "category": "sy",
+  "categoryLabel": "s+y → sh",
+  "written": "press your",
+  "soundsLike": "presher",
+  "example": "Press your luck → presher luck",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_023",
+  "category": "zy",
+  "categoryLabel": "z+y → zh",
+  "written": "as you",
+  "soundsLike": "azhoo",
+  "example": "As you wish → azhoo wish",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_024",
+  "category": "zy",
+  "categoryLabel": "z+y → zh",
+  "written": "because you",
+  "soundsLike": "becauzh you",
+  "example": "Because you asked → becauzh you asked",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_025",
+  "category": "zy",
+  "categoryLabel": "z+y → zh",
+  "written": "is your",
+  "soundsLike": "izhyer",
+  "example": "What is your name? → what's izhyer name?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_026",
+  "category": "zy",
+  "categoryLabel": "z+y → zh",
+  "written": "was your",
+  "soundsLike": "wuzhyer",
+  "example": "How was your day? → how wuzhyer day?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_027",
+  "category": "nasal",
+  "categoryLabel": "鼻音位置同化",
+  "written": "ten boys / ten people",
+  "soundsLike": "tem boys / tem people",
+  "example": "ten people → tem people",
+  "note": "/n/ 在 b/p/m 前变 /m/",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_028",
+  "category": "nasal",
+  "categoryLabel": "鼻音位置同化",
+  "written": "in person",
+  "soundsLike": "im person",
+  "example": "in person → im person",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_029",
+  "category": "nasal",
+  "categoryLabel": "鼻音位置同化",
+  "written": "one more / one minute",
+  "soundsLike": "wum more",
+  "example": "one more time → wum more time",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_030",
+  "category": "nasal",
+  "categoryLabel": "鼻音位置同化",
+  "written": "in case / in case of",
+  "soundsLike": "ing case",
+  "example": "in case → ing-case",
+  "note": "/n/ 在 k/g 前变 /ŋ/",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_031",
+  "category": "nasal",
+  "categoryLabel": "鼻音位置同化",
+  "written": "ten girls / ten guys",
+  "soundsLike": "teng guys",
+  "example": "ten guys → teng guys",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_032",
+  "category": "tap",
+  "categoryLabel": "美式弹舌音",
+  "written": "water / better / butter",
+  "soundsLike": "wader / bedder / budder",
+  "example": "water → wader, better → bedder",
+  "note": "美式核心特征，英式不适用",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_033",
+  "category": "tap",
+  "categoryLabel": "美式弹舌音",
+  "written": "get it / got it",
+  "soundsLike": "geddit / goddit",
+  "example": "Did you get it? → didjoo geddit?",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_034",
+  "category": "tap",
+  "categoryLabel": "美式弹舌音",
+  "written": "what is it",
+  "soundsLike": "wha-di-zit",
+  "example": "What is it → wha-di-zit",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "assim_035",
+  "category": "tap",
+  "categoryLabel": "美式弹舌音",
+  "written": "a little / a bottle",
+  "soundsLike": "a liddle / a boddle",
+  "example": "a little bit → a liddle bit",
+  "note": "",
+  "type": "assimilation"
+ },
+ {
+  "id": "seg_001",
+  "category": "word_final_consonant",
+  "categoryLabel": "词尾辅音",
+  "targetForm": "I've",
+  "ipa": "/aɪv/",
+  "referenceText": "I've been there before.",
+  "commonError": "devoicing /v/ to /f/, or dropping it entirely",
+  "practiceNote": "上齿轻触下唇，保持声带振动；可拉长成 aaaai-vvv 感受振动",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_002",
+  "category": "word_final_consonant",
+  "categoryLabel": "词尾辅音",
+  "targetForm": "I'll",
+  "ipa": "/aɪl/",
+  "referenceText": "I'll call you later.",
+  "commonError": "dark /l/ replaced with a vowel glide, or dropped entirely",
+  "practiceNote": "舌尖确实要贴住上齿龈，不只是靠近；先练 feel/will/call",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_003",
+  "category": "word_final_consonant",
+  "categoryLabel": "词尾辅音",
+  "targetForm": "I'm",
+  "ipa": "/aɪm/",
+  "referenceText": "I'm going home now.",
+  "commonError": "/m/ too short or swallowed, losing the nasal hum",
+  "practiceNote": "双唇完全闭合并保持，感受鼻腔的嗡嗡延续感",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_004",
+  "category": "consonant_cluster",
+  "categoryLabel": "辅音连缀",
+  "targetForm": "months",
+  "ipa": "/mʌnts/",
+  "referenceText": "It took three months to finish.",
+  "commonError": "dropping the final /s/, or forcing /θs/ literally",
+  "practiceNote": "/θs/ 在自然语流中同化成 /ts/，结尾听起来像 ants",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_005",
+  "category": "consonant_cluster",
+  "categoryLabel": "辅音连缀",
+  "targetForm": "asked",
+  "ipa": "/ɑːskt/ → /ɑːst/",
+  "referenceText": "I asked him a question.",
+  "commonError": "keeping all three consonants /skt/, unnaturally hard to articulate",
+  "practiceNote": "口语中 /k/ 常脱落，简化为 /ɑːst/",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_006",
+  "category": "silent_letter",
+  "categoryLabel": "哑音字母",
+  "targetForm": "mortgage",
+  "ipa": "/ˈmɔːɡɪdʒ/",
+  "referenceText": "We just got a mortgage on the house.",
+  "commonError": "pronouncing the t, which native speakers never do",
+  "practiceNote": "t 在 -stg- 组合里完全不发音",
+  "type": "segmental"
+ },
+ {
+  "id": "seg_007",
+  "category": "silent_letter",
+  "categoryLabel": "哑音字母",
+  "targetForm": "Wednesday",
+  "ipa": "/ˈwɛnzdeɪ/",
+  "referenceText": "I'll see you on Wednesday.",
+  "commonError": "pronouncing the first d, which is silent",
+  "practiceNote": "d 完全消失，实际是 Wenzeday",
+  "type": "segmental"
+ }
+]

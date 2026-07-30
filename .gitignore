@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# Personal practice data — never commit.
+# These hold the learner's own voice recordings, transcripts of their life, and
+# their dated score history. The app recreates all of it locally on first run.
+# ---------------------------------------------------------------------------
+VideoAudioFiles/
+*.result.json
+*.polished.txt
+history.json
+
+# Personal working notes — feedback on the author's own real recordings,
+# including employer and university names. Not part of the project.
+Intro_Feedback.md
+
+# One-off setup checklist — delete once pushed
+PUSH_TO_GITHUB.md
+
+# Generated dashboard / reports (built from the data above, so they embed it)
+dashboard.html
+progress.html
+report.html
+sample_report.html
+demo_report.html
+
+# Speech models — multi-GB, shared across projects, downloaded separately.
+# See the README for where to put them.
+models/
+
+# Imported listening clips — third-party audio under a mix of licences (some
+# non-redistributable, e.g. the Santa Barbara Corpus is CC BY-ND). Rebuild with
+# listening_import.py. The folder's README is kept.
+listening/*
+!listening/README.md
+
+# API keys live in ~/.english_coach.json (outside the repo) or in env vars.
+# This pattern is here as a belt-and-braces guard in case that ever moves.
+.english_coach.json
+.env
+*.key
+
+# Saved LLM replies from failed parses — may contain transcript content
+debug/
+
+# Project backup zips, if any get saved next to the project
+*.zip
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# macOS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp

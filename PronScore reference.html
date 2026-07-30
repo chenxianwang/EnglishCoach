@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PronScore reference</title>
+<style>
+  :root{--bg:#0f1221;--card:#1a1f36;--ink:#e8ecf5;--mut:#9aa3bf;--accent:#6ea8fe;
+        --good:#43c59e;--bad:#ff6b6b;--warn:#ffb454;--line:#2a3050;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:25px;margin:0 0 4px}
+  h2{font-size:18px;margin:26px 0 10px;border-left:3px solid var(--accent);padding-left:10px}
+  .sub{color:var(--mut);margin:0 0 8px}
+  .card{background:var(--card);border-radius:12px;padding:14px 18px;margin:12px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  code,.mono{font-family:ui-monospace,Menlo,monospace}
+  .formula{background:#11152b;border:1px solid var(--line);border-radius:10px;
+           padding:12px 16px;margin:8px 0;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+  .good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}.acc{color:var(--accent)}
+  .key{background:rgba(110,168,254,.12);border-left:3px solid var(--accent);
+       padding:9px 13px;border-radius:8px;margin:10px 0}
+  .flag{background:rgba(255,180,84,.12);border-left:3px solid var(--warn);
+        padding:9px 13px;border-radius:8px;margin:10px 0}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:12px;font-weight:600}
+  .on{background:rgba(67,197,158,.18);color:var(--good)}
+  .off{background:rgba(255,107,107,.18);color:var(--bad)}
+  .k{color:var(--mut);font-size:12px}
+  @media print{ body{background:#fff;color:#111}
+    .card,.formula{background:#f6f7fb;border-color:#ddd} .sub,.k,th{color:#555}
+    .acc{color:#3b6fd6}.key{background:#eef4ff}.flag{background:#fff6e8}
+    th,td{border-color:#ddd}}
+</style></head><body><div class="wrap">
+
+<h1>PronScore — how the pronunciation score is built</h1>
+<p class="sub">Azure Pronunciation Assessment · reference for English Coach.
+Source: Microsoft Learn, "Use pronunciation assessment" (updated 2025-11-21).</p>
+
+<h2>1 · The score is made of four sub-scores</h2>
+<div class="card"><table>
+<tr><th>Sub-score</th><th>What it measures</th><th>Level</th></tr>
+<tr><td><b>AccuracyScore</b></td><td>How closely each <b>phoneme</b> matches a native speaker. Word / full-text accuracy is aggregated up from the phoneme scores.</td><td>phoneme → word → full text</td></tr>
+<tr><td><b>FluencyScore</b></td><td>How native-like your <b>silent breaks / pausing</b> between words are.</td><td>full text</td></tr>
+<tr><td><b>CompletenessScore</b></td><td>Ratio of words you actually <b>pronounced</b> ÷ words in the reference text.</td><td>full text</td></tr>
+<tr><td><b>ProsodyScore</b></td><td>How natural: <b>stress, intonation, speed, rhythm</b>. Drives the Monotone / break error tags.</td><td>full text</td></tr>
+</table>
+<p class="k">A word is flagged <b>Mispronunciation</b> when its AccuracyScore falls below <b>60</b>.</p></div>
+
+<h2>2 · The formula (this is the important part)</h2>
+<p class="sub">Take the sub-scores that are available, <b>sort them low → high</b>, and call them
+<span class="mono">s0</span> (lowest) … <span class="mono">s3</span> (highest). Then:</p>
+
+<div class="card">
+<b>Reading a script (what this app does):</b>
+<div class="formula">with prosody:&nbsp;&nbsp;&nbsp;&nbsp;PronScore = <span class="acc">0.4·s0</span> + 0.2·s1 + 0.2·s2 + 0.2·s3</div>
+<div class="formula">without prosody: PronScore = <span class="acc">0.6·s0</span> + 0.2·s1 + 0.2·s2</div>
+<b style="display:block;margin-top:12px">Speaking freely (no completeness score):</b>
+<div class="formula">with prosody:&nbsp;&nbsp;&nbsp;&nbsp;PronScore = <span class="acc">0.6·s0</span> + 0.2·s1 + 0.2·s2</div>
+<div class="formula">without prosody: PronScore = <span class="acc">0.6·s0</span> + 0.4·s1</div>
+</div>
+
+<div class="key"><b>The one thing to remember:</b> <span class="acc">s0 is your <u>worst</u> sub-score, and it carries 40–60% of the weight.</span>
+Your lowest dimension dominates the number. One weak area (e.g. a floor-level prosody on a single word) drags the whole score down — that's <i>by design</i>, not a bug.</div>
+
+<h2>3 · Worked example: why "ah" was capped at ~73</h2>
+<div class="card">Single interjection, prosody was on. Say Accuracy 96, Fluency 80, Prosody 55.
+Sorted: s0=55, s1=80, s2=96. Without completeness it's the "without prosody"… no —
+prosody <i>is</i> present, so speaking-with-prosody:
+<div class="formula">0.6·55 + 0.2·80 + 0.2·96 = 33 + 16 + 19.2 = <b class="warn">68.2</b></div>
+Your 96 accuracy barely mattered because the weak prosody was s0. Fix = don't score prosody on one word.</div>
+
+<h2>4 · How English Coach is configured</h2>
+<div class="card"><table>
+<tr><th>Setting</th><th>Single-word drill</th><th>Full-story analysis</th></tr>
+<tr><td>Locale (accent)</td><td class="acc">en-US</td><td class="acc">en-US</td></tr>
+<tr><td>Grading</td><td>HundredMark (0–100)</td><td>HundredMark</td></tr>
+<tr><td>Granularity</td><td>Phoneme</td><td>Phoneme</td></tr>
+<tr><td>Miscue (word match)</td><td><span class="pill off">OFF</span> homophones (tied/tide) shouldn't be docked</td><td><span class="pill on">ON</span> catches skipped/inserted words</td></tr>
+<tr><td>Prosody</td><td><span class="pill off">OFF</span> meaningless for one word</td><td><span class="pill on">ON</span> rhythm / monotone feedback</td></tr>
+<tr><td>Number shown</td><td><b>AccuracyScore</b> only</td><td>blended <b>PronScore</b></td></tr>
+</table></div>
+
+<h2>5 · Accent locale</h2>
+<div class="flag">Both single words and stories grade against <b>en-US</b> (American target).
+Prosody, syllable breakdown, spoken-phoneme candidates and IPA phoneme names are <u>en-US only</u> in Azure,
+so staying on en-US keeps every feature available. en-GB was tried for single words but graded British
+targets too harshly on an American-leaning voice, so it was reverted. Single words still turn
+<b>prosody off</b> (meaningless for one word) and grade on <b>accuracy</b>; stories keep the full blended PronScore.</div>
+
+<h2>6 · The app's own colour & mastery rules (on top of Azure)</h2>
+<div class="card">
+Trend dots: <span class="good">■ green ≥ 85</span> &nbsp; <span class="warn">■ yellow 75–84</span> &nbsp; <span class="bad">■ red &lt; 75</span>.<br>
+<b>Mastered</b> (for the Practice filter) = your <b>last 3 attempts are all ≥ 85</b>.<br>
+No hidden strictness curve is applied to practice scores — 85 means a raw Azure 85.
+</div>
+
+<p class="k" style="margin-top:22px;text-align:center">English Coach · PronScore quick-reference · print to keep by your desk</p>
+</div></body></html>
