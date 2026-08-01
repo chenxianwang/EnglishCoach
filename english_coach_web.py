@@ -147,11 +147,54 @@ def save_progress(data):
         pass
 
 
+def _is_score_history(d):
+    """True if every value in dict `d` is a list — the shape of ec_scores
+    (word -> [{s, d}, ...]). Used to decide whether a key's sub-entries can be
+    unioned instead of the whole value being replaced."""
+    return isinstance(d, dict) and all(isinstance(v, list) for v in d.values())
+
+
+def _dedup_entries(entries):
+    seen, out = set(), []
+    for e in entries:
+        k = json.dumps(e, sort_keys=True) if isinstance(e, (dict, list)) else e
+        if k not in seen:
+            seen.add(k)
+            out.append(e)
+    return out
+
+
+def _merge_progress(old, new):
+    """Per-key last-write-wins, with one exception: for a key shaped like
+    ec_scores (a dict of word -> list of score entries), union each word's
+    list instead of replacing the whole dict.
+
+    Plain last-write-wins works fine for a single device, but two devices (or
+    two tabs) syncing minutes apart both send their own full ec_scores
+    snapshot — whichever POSTs second would otherwise silently discard scores
+    the first one just logged. That's exactly what happened once already, so
+    this key gets the safer treatment; everything else keeps simple replace.
+    """
+    merged = dict(old)
+    for key, new_val in new.items():
+        old_val = old.get(key)
+        if _is_score_history(new_val) and _is_score_history(old_val):
+            combined = dict(old_val)
+            for word, new_list in new_val.items():
+                old_list = combined.get(word, [])
+                combined[word] = _dedup_entries(old_list + new_list) if isinstance(old_list, list) else new_list
+            merged[key] = combined
+        else:
+            merged[key] = new_val
+    return merged
+
+
 @app.route("/api/progress", methods=["GET", "POST"])
 def api_progress():
     """The server-side replacement for localStorage: GET returns everything,
-    POST merges in whichever keys the client is updating (per-key last-write-
-    wins — simple, and fine for one person on at most a couple of devices)."""
+    POST merges in whichever keys the client is updating. Most keys are
+    per-key last-write-wins (fine for one person on at most a couple of
+    devices); ec_scores is unioned instead — see _merge_progress."""
     from flask import jsonify
     if request.method == "GET":
         return jsonify(load_progress())
@@ -159,8 +202,7 @@ def api_progress():
     if not isinstance(payload, dict):
         return jsonify(error="expected a JSON object"), 400
     with _progress_lock:
-        data = load_progress()
-        data.update(payload)
+        data = _merge_progress(load_progress(), payload)
         save_progress(data)
     return jsonify(ok=True)
 
