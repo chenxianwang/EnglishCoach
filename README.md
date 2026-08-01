@@ -21,20 +21,24 @@ The recognizer failed in the same way a human listener would, and it tells you
 exactly which sound to drill.
 
 Everything runs locally. Transcription and prosody analysis never leave the
-machine; only the optional grammar check and pronunciation scoring call an API.
+machine; only the optional grammar check, pronunciation scoring, and photo
+vocabulary capture call an API.
 
 ![Recording report](docs/screenshot-report.png)
 
 ## What's inside
 
-The app is a single dashboard with **15 training panels** organised around what
-you're working on:
+The app is a single dashboard with **16 training panels** organised around
+what you're working on, plus a **Setting Panel** for API keys and login
+(covered under [API keys](#api-keys) and [Login](#login) below, not in this
+table — it's configuration, not training):
 
 ### Speaking
 | Panel | What it does |
 |---|---|
 | 📈 Summary & progress | improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
-| 📖 Practice stories | load a known reference text and practise the whole passage |
+| 🎯 Practice single word | say a word, get an instant Azure accuracy score — every attempt is logged so you can watch a specific word improve |
+| 📖 Reading | reread the polished version of one of your own past recordings, scored against it |
 | 📋 Speaking error log | grammar and word-choice mistakes aggregated across sessions |
 | 🗣️ Speaking vocabulary | how much distinct vocabulary you actually produce, growth over time, and the words you're recycling |
 | 📣 How-to: tricky words | step-by-step articulation guides for problem sounds |
@@ -52,7 +56,7 @@ you're working on:
 |---|---|
 | 🎧 Sound system | the full English phoneme inventory with audio and examples |
 | 🗣️ 中→EN Pronunciation | Mandarin-L1 specific: the interference patterns you'll keep hitting |
-| 📇 Vocabulary & chunks | high-frequency words and fixed expressions to practise |
+| 📇 Vocabulary & chunks | high-frequency words and fixed expressions to practise — capture your own by hand, or from a photo of your surroundings (see [Architecture](#architecture)) |
 | 🎭 Register | formal vs. informal, written vs. spoken — when to use which |
 | 📕 Vowels & consonants 101 | the basics of how English sounds are made |
 | 🧮 How scoring works | what each metric means and how the numbers are calculated |
@@ -85,7 +89,7 @@ python english_coach_web.py
 # http://localhost:8000
 ```
 
-Everything happens on one page. **➕ New analysis** opens the capture workflow:
+Everything happens on one page. **➕ New Speaking Analysis** opens the capture workflow:
 
 - **Record in the browser** via `MediaRecorder`, or upload any audio/video file.
   A recording made in-page is handed to the upload field directly, so there's no
