@@ -110,15 +110,28 @@ curve, and a drill list seeded from the words you actually got wrong.
 
 ### API keys
 
-Keys are entered once in the UI and saved to `~/.english_coach.json`, outside
-the project directory. Nothing is committed. Environment variables
-(`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `DEEPSEEK_API_KEY`,
-`ANTHROPIC_API_KEY`) override the stored values.
+Keys are entered once in the **Setting Panel** and saved to
+`~/.english_coach.json`, outside the project directory. Nothing is committed.
+Environment variables (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`,
+`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `KIMI_API_KEY`) override the stored
+values.
 
-Both API integrations are optional and degrade independently: with no Azure key
+All API integrations are optional and degrade independently: with no Azure key
 you still get grammar analysis and prosody, and with no LLM key you still get
 pronunciation scoring, prosody and fluency. A failure in one never discards the
-results of the other.
+results of the other. Photo → vocabulary capture is the exception that needs
+*something*: it always goes through a vision-capable model (Kimi if
+`KIMI_API_KEY` is set, else Anthropic/Claude), since DeepSeek's API is
+text-only.
+
+### Login
+
+The whole app sits behind a single password (session-cookie based, 30-day
+sessions) — worth knowing if you're running this somewhere reachable off your
+own machine, which is the assumption once you're past `localhost`. First run
+generates a random password and prints it once to the console; change it from
+the Setting Panel afterward. There's no per-user account system — this is a
+personal tool, not a multi-tenant one.
 
 ### Speech models
 
@@ -139,24 +152,36 @@ defaults to `HF_ENDPOINT=https://hf-mirror.com`.
 
 ```
 audio ─┬─> faster-whisper ──────> transcript ─┬─> LLM ──────> grammar, word choice, polished rewrite
-       │                                      │
+       │                                      │              (DeepSeek, or Claude)
        ├─> Azure Speech ────────────────────> phoneme scores, per-word errors, prosody sub-score
        │
        └─> NumPy FFT pitch tracker ────────> pitch variation, range, rate, pause ratio, nPVI rhythm
+
+photo ──────> vision LLM (Kimi, falling back to Claude) ──> candidate vocabulary
+                                                             (headword, definition, example, scenario)
                                                           │
                                                           v
-                                    one self-contained HTML dashboard (no build step,
-                                    no external assets, no framework)
+                        one self-contained HTML dashboard, behind a login gate
+                        (no build step, no external assets, no framework)
+                                                          │
+                                                          v
+     scores · vocabulary · grammar log · SRS schedules ──> progress.json
+                    (server-side — synced across every device you log in from,
+                     not left sitting in one browser's storage)
 ```
 
 ### Core files
 
-- **`english_coach.py`** — the engine. Transcription, scoring, LLM analysis, the
-  prosody analyzer, IPA lookup via CMUdict, and the dashboard generator with
-  all 15 training panels.
+- **`english_coach.py`** — the engine. Transcription, scoring, LLM analysis
+  (DeepSeek/Claude for grammar, Kimi/Claude for vision), the prosody analyzer,
+  IPA lookup via CMUdict, and the dashboard generator with all its training
+  panels — plus the client-side JS embedded in it, including `SkillStore`, the
+  shared client that hydrates from and persists to `/api/progress`.
 - **`english_coach_web.py`** — Flask app. Upload, transcribe, score, serve the
   dashboard; long jobs run on background threads and stream progress to the
-  browser by polling.
+  browser by polling. Also owns the login/session layer (every route is gated
+  except `/login`) and `/api/progress`, the server-side store that replaced
+  browser-only localStorage.
 - **`transcribe_service.py`** — a standalone, reusable sherpa-onnx STT
   microservice (HTTP + WebSocket, self-describing `/api` spec). Mounted into the
   web app so live captions work in a single process, but runnable on its own.
@@ -320,8 +345,16 @@ for the drill list.
 Time on task is tracked too, measured from the actual length of every analyzed
 recording and bucketed by day, week, or month. Empty periods are drawn as
 zero-height stubs rather than skipped, so a gap reads as a day you didn't
-practise instead of silently vanishing from the axis. Practice data stays local
-and is not part of this repository.
+practise instead of silently vanishing from the axis.
+
+Everything from the Vocabulary, Practice words, Grammar log, Listening and ear
+training panels — scores, review schedules, error logs — lives in
+`VideoAudioFiles/progress.json` on the server, not in the browser. A shared
+client (`SkillStore`) hydrates an in-memory cache from `/api/progress` once per
+page load and writes through to it on every change, so the same progress shows
+up whether you're on your phone or your Mac — the thing browser-only
+`localStorage` could never do. Like `history.json`, it's excluded from this
+repository via `.gitignore`.
 
 ![Prosody meter](docs/screenshot-prosody.png)
 
