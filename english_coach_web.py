@@ -18,15 +18,19 @@ the progress summary.
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
 import traceback
 import uuid
 import webbrowser
+from datetime import timedelta
+from urllib.parse import quote
 
 try:
-    from flask import Flask, request, redirect
+    from flask import Flask, request, redirect, session
+    from werkzeug.security import generate_password_hash, check_password_hash
     from werkzeug.utils import secure_filename
 except ImportError:
     raise SystemExit(
@@ -69,6 +73,12 @@ try:
 
     @_live_sock.route("/v1/stream")
     def _live_stream(ws):
+        # belt-and-suspenders: @app.before_request already gates this route,
+        # but the sock upgrade lifecycle is different enough from a normal
+        # request/response that it's worth checking again right here.
+        if not session.get("authed"):
+            ws.close()
+            return
         try:
             sr = int(request.args.get("sample_rate", 16000))
         except (TypeError, ValueError):
@@ -96,6 +106,230 @@ def save_config(cfg):
             json.dump(cfg, f)
     except Exception:
         pass
+
+
+# Practice scores, vocabulary, grammar log, listening SRS, ear-training and
+# Mandarin-contrast stats — everything the client used to keep only in
+# localStorage (device-only, invisible from a second browser/device). Stored
+# next to history.json so it rides along with the recordings it's about.
+PROGRESS_PATH = os.path.join(LIBRARY, "progress.json")
+
+
+def load_progress():
+    try:
+        with open(PROGRESS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_progress(data):
+    try:
+        os.makedirs(os.path.dirname(PROGRESS_PATH), exist_ok=True)
+        with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+@app.route("/api/progress", methods=["GET", "POST"])
+def api_progress():
+    """The server-side replacement for localStorage: GET returns everything,
+    POST merges in whichever keys the client is updating (per-key last-write-
+    wins — simple, and fine for one person on at most a couple of devices)."""
+    from flask import jsonify
+    if request.method == "GET":
+        return jsonify(load_progress())
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="expected a JSON object"), 400
+    data = load_progress()
+    data.update(payload)
+    save_progress(data)
+    return jsonify(ok=True)
+
+
+def _get_or_create_secret_key():
+    """Flask session-signing key. Generated once and persisted, so restarting
+    the server (or the launchd service) doesn't invalidate every session."""
+    cfg = load_config()
+    key = cfg.get("secret_key")
+    if not key:
+        key = secrets.token_hex(32)
+        save_config({**cfg, "secret_key": key})
+    return key
+
+
+def _ensure_web_password():
+    """First boot only: generate a random login password rather than exposing
+    a public "choose your password" form — with the app now reachable on the
+    open internet, the first stranger to hit that form before the owner does
+    would get to set (and lock in) the password instead. Printed once, here,
+    never sent over the network."""
+    cfg = load_config()
+    if cfg.get("web_password_hash"):
+        return
+    pw = secrets.token_urlsafe(9)
+    save_config({**cfg, "web_password_hash": generate_password_hash(pw)})
+    print("=" * 60)
+    print("No login password was set for the web app — generated one:")
+    print("    %s" % pw)
+    print("Log in with it at /login, then set your own from the Setting Panel.")
+    print("=" * 60)
+
+
+app.secret_key = _get_or_create_secret_key()
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+_ensure_web_password()
+
+_PUBLIC_PATHS = ("/login",)
+_PUBLIC_PREFIXES = ("/static/",)
+
+
+@app.before_request
+def _require_login():
+    p = request.path
+    if p in _PUBLIC_PATHS or any(p.startswith(pre) for pre in _PUBLIC_PREFIXES):
+        return
+    if not session.get("authed"):
+        nxt = quote(request.full_path if request.query_string else request.path, safe="")
+        return redirect("/login?next=" + nxt)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = ""
+    if request.method == "POST":
+        cfg = load_config()
+        if check_password_hash(cfg.get("web_password_hash", ""), request.form.get("password", "")):
+            session.permanent = True
+            session["authed"] = True
+            return redirect(request.args.get("next") or "/")
+        error = "Wrong password."
+    return ("""
+    <!doctype html><html><head><title>English Coach — Login</title>
+    <meta name='viewport' content='width=device-width,initial-scale=1'>
+    <style>
+      body{background:#0b0f16;color:#e7ecf3;font-family:system-ui,sans-serif;
+           display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+      form{background:#151b26;padding:32px 36px;border-radius:14px;width:280px;
+           border:1px solid #22343f}
+      h1{font-size:20px;margin:0 0 18px}
+      input{width:100%%;box-sizing:border-box;padding:9px 11px;border-radius:8px;
+            border:1px solid #22343f;background:#0b0f16;color:#e7ecf3;font-size:15px}
+      button{margin-top:12px;width:100%%;padding:10px;border-radius:8px;border:0;
+             background:#46b3c9;color:#08222b;font-weight:700;cursor:pointer;font-size:15px}
+      p.err{color:#ff6b6b;margin:0 0 12px}
+    </style></head><body>
+    <form method='post'>
+      <h1>English Coach</h1>
+      %s
+      <input type='password' name='password' placeholder='Password' autofocus required>
+      <button type='submit'>Log in</button>
+    </form></body></html>
+    """ % (("<p class='err'>%s</p>" % error) if error else ""))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/change_password", methods=["POST"])
+def change_password():
+    new_pw = request.form.get("new_password", "").strip()
+    if not new_pw:
+        return redirect("/?p=settings&msg=" + quote("Password cannot be empty."))
+    save_config({**load_config(), "web_password_hash": generate_password_hash(new_pw)})
+    return redirect("/?p=settings&msg=" + quote("✓ Password updated."))
+
+
+def _persist_keys_from_form(form):
+    """Read Azure/DeepSeek/Anthropic/Kimi keys off a submitted form (falling
+    back to whatever's already set), push them into the process environment,
+    and persist them to disk. Shared by /settings and /analyze, since a key
+    can be saved from either the Setting Panel or the analysis form."""
+    cfg = load_config()
+    azure_key = form.get("azure_key", "").strip() or os.environ.get("AZURE_SPEECH_KEY") or cfg.get("azure_key", "")
+    azure_region = form.get("azure_region", "").strip() or cfg.get("azure_region", "eastus")
+    anthropic_key = form.get("anthropic_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY") or cfg.get("anthropic_key", "")
+    deepseek_key = form.get("deepseek_key", "").strip() or os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_key", "")
+    kimi_key = form.get("kimi_key", "").strip() or os.environ.get("KIMI_API_KEY") or cfg.get("kimi_key", "")
+    if azure_key:
+        os.environ["AZURE_SPEECH_KEY"] = azure_key
+    if azure_region:
+        os.environ["AZURE_SPEECH_REGION"] = azure_region
+    if anthropic_key:
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+    if deepseek_key:
+        os.environ["DEEPSEEK_API_KEY"] = deepseek_key
+    if kimi_key:
+        os.environ["KIMI_API_KEY"] = kimi_key
+    # a DeepSeek key present means "use DeepSeek"; llm_analyze auto-detects
+    os.environ["LLM_PROVIDER"] = "deepseek" if deepseek_key else "anthropic"
+    keys = {"azure_key": azure_key, "azure_region": azure_region,
+            "anthropic_key": anthropic_key, "deepseek_key": deepseek_key,
+            "kimi_key": kimi_key}
+    save_config({**cfg, **keys})
+    return keys
+
+
+def _settings_panel(msg="", active=""):
+    """The Setting Panel — API keys and related config, split out of the
+    analysis form so a key can be saved without uploading a recording."""
+    cfg = load_config()
+    akey = os.environ.get("AZURE_SPEECH_KEY") or cfg.get("azure_key", "")
+    aregion = os.environ.get("AZURE_SPEECH_REGION") or cfg.get("azure_region", "eastus")
+    ankey = os.environ.get("ANTHROPIC_API_KEY") or cfg.get("anthropic_key", "")
+    dkey = os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_key", "")
+    kkey = os.environ.get("KIMI_API_KEY") or cfg.get("kimi_key", "")
+    ph = lambda k: "•••••• (saved — leave blank to keep)" if k else ""
+    note = (("<p id='flash-msg' class='summary' style='border-left:4px solid var(--good)'>%s</p>" % msg)
+            if msg and active == "settings" else "")
+    return ("""
+    <section id='settings' class='tabpanel hidden'>
+      <h1>Setting Panel</h1>
+      <p class='sub'>API keys and configuration shared across the app. Saved to
+      <code>~/.english_coach.json</code>, outside the project directory — nothing
+      here is committed.</p>
+      %s
+      <form method='post' action='/settings'>
+        <div class='card'>
+          <label>Azure key <span class='hint'>· pronunciation scoring</span>
+            <input type='password' name='azure_key' placeholder="%s" style='width:100%%'></label><br>
+          <label style='display:block;margin-top:6px'>Azure region
+            <input type='text' name='azure_region' value='%s'></label><br>
+          <p class='hint' style='margin:10px 0 4px'>Grammar analysis — provide ONE key. If both are set, DeepSeek is used.</p>
+          <label style='display:block;margin-top:6px'>DeepSeek key <span class='hint'>· recommended — cheaper &amp; reachable from China (used by default)</span>
+            <input type='password' name='deepseek_key' placeholder="%s" style='width:100%%'></label>
+          <label style='display:block;margin-top:6px'>Anthropic key <span class='hint'>· optional</span>
+            <input type='password' name='anthropic_key' placeholder="%s" style='width:100%%'></label>
+          <p class='hint' style='margin:10px 0 4px'>Vocabulary — photo capture (Vocabulary &amp; chunks &rarr; From photo)
+            needs a vision-capable model; DeepSeek's API is text-only. Kimi is used if set, else Anthropic.</p>
+          <label style='display:block;margin-top:6px'>Kimi key <span class='hint'>· for photo vocabulary capture</span>
+            <input type='password' name='kimi_key' placeholder="%s" style='width:100%%'></label>
+        </div>
+        <button type='submit' style='font-size:16px;padding:10px 20px;border-radius:10px;
+           border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
+           💾 Save settings</button>
+      </form>
+      <form method='post' action='/change_password'>
+        <div class='card'>
+          <h2 style='margin-top:0'>Login password</h2>
+          <p class='hint' style='margin:0 0 10px'>Guards every page on this
+            server, including over the public tunnel. Changing it here signs
+            out any other logged-in browser next time it loads a page.</p>
+          <label>New password<br>
+            <input type='password' name='new_password' required style='width:100%%'></label>
+        </div>
+        <button type='submit' style='font-size:16px;padding:10px 20px;border-radius:10px;
+           border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
+           🔒 Update password</button>
+      </form>
+      <p class='hint' style='margin-top:16px'><a href='/logout' style='color:var(--accent)'>Log out</a></p>
+    </section>
+    """ % (note, ph(akey), aregion, ph(dkey), ph(ankey), ph(kkey)))
 
 
 def _load_items_and_history():
@@ -135,25 +369,17 @@ def _load_items_and_history():
     return items, history
 
 
-def _form_panel(msg=""):
-    cfg = load_config()
-    akey = os.environ.get("AZURE_SPEECH_KEY") or cfg.get("azure_key", "")
-    aregion = os.environ.get("AZURE_SPEECH_REGION") or cfg.get("azure_region", "eastus")
-    ankey = os.environ.get("ANTHROPIC_API_KEY") or cfg.get("anthropic_key", "")
-    dkey = os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_key", "")
-    note = ("<p id='flash-msg' class='summary' style='border-left:4px solid var(--good)'>%s</p>" % msg) if msg else ""
+def _form_panel(msg="", active=""):
+    note = (("<p id='flash-msg' class='summary' style='border-left:4px solid var(--good)'>%s</p>" % msg)
+            if msg and active == "newrec" else "")
     # live-transcribe WebSocket URL. Default: SAME origin (mounted on this app —
     # one process). Set TRANSCRIBE_SERVICE_URL to point at a separate service.
     _svc = os.environ.get("TRANSCRIBE_SERVICE_URL", "")
     _ws_url = ((_svc.replace("https://", "wss://").replace("http://", "ws://")
                 .rstrip("/") + "/v1/stream") if _svc else "")
-    # mask stored keys (show a placeholder so the user knows one is saved)
-    akey_ph = "•••••• (saved — leave blank to keep)" if akey else ""
-    ankey_ph = "•••••• (saved — leave blank to keep)" if ankey else ""
-    dkey_ph = "•••••• (saved — leave blank to keep)" if dkey else ""
     return ("""
     <section id='newrec' class='tabpanel hidden'>
-      <h1>Analyze a recording</h1>
+      <h1>New Speaking Analysis</h1>
       <p class='sub'>Upload your audio and the script you read aloud, then run.</p>
       %s
       <form method='post' action='/analyze' enctype='multipart/form-data'>
@@ -176,8 +402,8 @@ def _form_panel(msg=""):
             what you really said — otherwise a transcription slip looks like your mistake.
             (Pronunciation is scored separately from your audio by Azure.)</p>
           <div id='tx-check' class='hint' style='margin-top:6px'></div>
-          <div style='margin-top:8px'>📖 Load from stories
-            <select id='story-sel' onchange='loadStory(this.value)'>
+          <div style='margin-top:8px'>📖 Load a polished reading
+            <select id='reading-sel' onchange='loadReading(this.value)'>
               <option value=''>choose…</option></select></div>
           <button type='button' id='tx-btn' onclick='transcribeAudio()'
              style='margin-top:8px;padding:6px 12px;border-radius:8px;border:0;
@@ -215,16 +441,6 @@ def _form_panel(msg=""):
               <option value='strict' selected>Strict</option>
               <option value='very_strict'>Very strict</option>
             </select></label>
-        </div>
-        <div class='card'>
-          <label>Azure key <input type='password' name='azure_key' placeholder=\"%s\" style='width:100%%'></label><br>
-          <label style='display:block;margin-top:6px'>Azure region
-            <input type='text' name='azure_region' value='%s'></label><br>
-          <p class='hint' style='margin:10px 0 4px'>Grammar analysis — provide ONE key (or upload a JSON above). If both are set, DeepSeek is used.</p>
-          <label style='display:block;margin-top:6px'>DeepSeek key <span class='hint'>· recommended — cheaper &amp; reachable from China (used by default)</span>
-            <input type='password' name='deepseek_key' placeholder=\"%s\" style='width:100%%'></label>
-          <label style='display:block;margin-top:6px'>Anthropic key <span class='hint'>· optional</span>
-            <input type='password' name='anthropic_key' placeholder=\"%s\" style='width:100%%'></label>
         </div>
         <button type='submit' style='font-size:16px;padding:10px 20px;border-radius:10px;
            border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
@@ -412,15 +628,15 @@ def _form_panel(msg=""):
           }).catch(function(){ out.textContent='Mic permission denied.'; });
         }
         window.recordMic=recordMic; window.practiceRecord=practiceRecord;
-        // populate the "Load from stories" picker once the page (and STORIES) is ready
-        window.loadStory=function(i){ if(i===''||i==null)return; var s=(window.STORIES||[])[i];
+        // polished texts from past recordings can be reused as the script for a reread
+        window.loadReading=function(i){ if(i===''||i==null)return; var s=(window.READING_ITEMS||[])[i];
           if(s){ document.getElementById('transcript').value=s.text; } };
-        window.addEventListener('load',function(){ var sel=document.getElementById('story-sel');
-          if(!sel)return; (window.STORIES||[]).forEach(function(s,i){ var o=document.createElement('option');
+        window.addEventListener('load',function(){ var sel=document.getElementById('reading-sel');
+          if(!sel)return; (window.READING_ITEMS||[]).forEach(function(s,i){ var o=document.createElement('option');
             o.value=i; o.textContent=s.name; sel.appendChild(o); }); });
       </script>
     </section>
-    """ % (note, akey_ph, aregion, dkey_ph, ankey_ph)) + (
+    """ % (note,)) + (
         "<script>window.LIVE_WS=%r;"
         # flash banner: strip msg from the URL (so a refresh won't repeat it)
         # and auto-dismiss after a few seconds
@@ -624,10 +840,13 @@ def _h_attr(s):
 def _page(active="summary", msg=""):
     items, history = _load_items_and_history()
     _sum_cls = " class='active'" if active == "summary" else ""
-    extra_nav = ("<a data-panel='newrec'>➕ New analysis</a>"
+    extra_nav = ("<a data-panel='settings'>⚙️ Setting Panel</a>"
                  "<a data-panel='summary'%s>📈 Summary &amp; progress</a>"
-                 "<a data-panel='practice'>🎯 Practice single word</a>" % _sum_cls)
-    extra_panels = _form_panel(msg) + _practice_panel(items)
+                 "<a data-panel='newrec'>➕ New Speaking Analysis</a>"
+                 "<a data-panel='practice'>🎯 Practice single word</a>"
+                 % _sum_cls)
+    extra_panels = (_settings_panel(msg, active) + _form_panel(msg, active)
+                    + _practice_panel(items))
     return ec.generate_dashboard_html(
         items, history, extra_nav=extra_nav,
         extra_panels=extra_panels, active=active)
@@ -708,21 +927,13 @@ def backup():
     """Send a zip of the project — source, data and notes, no media.
 
     Built in memory and streamed as a download, so the backup lands somewhere
-    other than the folder it is backing up. POST carries the browser's
-    localStorage (scores, review schedules, error logs), which the server has no
-    other way of seeing; GET still works and just omits it.
+    other than the folder it is backing up. Scores/schedules/error logs live in
+    progress.json now (server-side, next to history.json), so they're already
+    picked up by _backup_members() like any other project file — nothing to
+    collect from the browser.
     """
     from flask import Response
-    practice = None
-    if request.method == "POST":
-        payload = request.get_json(silent=True) or {}
-        p = payload.get("practice")
-        if isinstance(p, dict) and p:
-            # values are the raw localStorage strings; drop collapsed-sidebar
-            # state, which is per-device UI preference rather than learning data
-            practice = {str(k): v for k, v in p.items()
-                        if isinstance(v, str) and not str(k).startswith("navsec_")}
-    data, name, count = ec.build_project_backup(practice_data=practice)
+    data, name, count = ec.build_project_backup()
     return Response(data, mimetype="application/zip", headers={
         "Content-Disposition": 'attachment; filename="%s"' % name,
         "Content-Length": str(len(data)),
@@ -852,6 +1063,42 @@ def practice():
             os.remove(tmp)
         except Exception:
             pass
+
+
+@app.route("/vocab_photo", methods=["POST"])
+def vocab_photo():
+    """Turn an uploaded photo into candidate vocabulary items (vision LLM).
+
+    ec.vision_vocab_from_image() picks Kimi if a key is set, else Anthropic —
+    both keys are passed through here so it can choose. The browser already
+    downscales the image to a JPEG before this runs (see the vocab panel's
+    downscaleImage), so the size guard here is just a backstop.
+    """
+    from flask import jsonify
+    f = request.files.get("image")
+    if not f:
+        return jsonify(error="No image received.")
+    data = f.read()
+    if not data:
+        return jsonify(error="The image was empty.")
+    if len(data) > 6 * 1024 * 1024:
+        return jsonify(error="Image is too large (max 6MB).")
+    cfg = load_config()
+    kimi_key = os.environ.get("KIMI_API_KEY") or cfg.get("kimi_key", "")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or cfg.get("anthropic_key", "")
+    if not (kimi_key or anthropic_key):
+        return jsonify(error="No Kimi or Anthropic key set — photo capture needs "
+                             "a vision-capable model (DeepSeek's API is "
+                             "text-only). Add one in Settings.")
+    if kimi_key:
+        os.environ["KIMI_API_KEY"] = kimi_key
+    if anthropic_key:
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+    try:
+        items = ec.vision_vocab_from_image(data, mime_type=f.mimetype or "image/jpeg")
+        return jsonify(items=items)
+    except Exception as e:
+        return jsonify(error=str(e)[:300])
 
 
 def _stem_of(filename):
@@ -1118,6 +1365,12 @@ def _waiting_page(job):
             "</script>")
 
 
+@app.route("/settings", methods=["POST"])
+def settings():
+    _persist_keys_from_form(request.form)
+    return redirect("/?p=settings&msg=" + quote("✓ Settings saved."))
+
+
 @app.route("/analyze", methods=["POST"])
 def analyze():
     try:
@@ -1142,26 +1395,12 @@ def analyze():
             with open(os.path.join(d, stem + ".txt"), "w", encoding="utf-8") as t:
                 t.write(transcript)
 
-        cfg = load_config()
-        azure_key = request.form.get("azure_key", "").strip() or os.environ.get("AZURE_SPEECH_KEY") or cfg.get("azure_key", "")
-        azure_region = request.form.get("azure_region", "").strip() or cfg.get("azure_region", "eastus")
-        anthropic_key = request.form.get("anthropic_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY") or cfg.get("anthropic_key", "")
-        deepseek_key = request.form.get("deepseek_key", "").strip() or os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_key", "")
-        if azure_key:
-            os.environ["AZURE_SPEECH_KEY"] = azure_key
-        if azure_region:
-            os.environ["AZURE_SPEECH_REGION"] = azure_region
-        if anthropic_key:
-            os.environ["ANTHROPIC_API_KEY"] = anthropic_key
-        if deepseek_key:
-            os.environ["DEEPSEEK_API_KEY"] = deepseek_key
-        # a DeepSeek key present means "use DeepSeek"; llm_analyze auto-detects
-        os.environ["LLM_PROVIDER"] = "deepseek" if deepseek_key else "anthropic"
-        save_config({**cfg, "azure_key": azure_key, "azure_region": azure_region,
-                     "anthropic_key": anthropic_key, "deepseek_key": deepseek_key})
+        # keys are configured on the Setting Panel now; this form only carries
+        # per-analysis options, so fall back to whatever's already saved there
+        keys = _persist_keys_from_form(request.form)
 
         do_azure = request.form.get("do_azure") == "on"
-        do_llm = bool(anthropic_key or deepseek_key)
+        do_llm = bool(keys["anthropic_key"] or keys["deepseek_key"])
         strictness = request.form.get("strictness", "strict")
 
         if do_azure and not transcript:
@@ -1191,10 +1430,11 @@ def main():
     port = int(os.environ.get("PORT", "8000"))
     url = "http://localhost:%d" % port
     print("English Coach is running at %s  (Ctrl+C to stop)" % url)
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    if not os.environ.get("EC_NO_BROWSER"):
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
     # threaded=True so live-transcribe WebSockets and normal requests coexist
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
 

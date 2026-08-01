@@ -29,12 +29,13 @@ Dependencies for real analysis (not needed for --demo):
 """
 
 import argparse
+import base64
 import html
 import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 
@@ -754,6 +755,213 @@ def _deepseek_analyze(transcript, model=None):
         except RuntimeError as second:
             raise RuntimeError(
                 "DeepSeek returned malformed JSON and the repair attempt also "
+                "failed.\n  original: %s\n  repair:   %s" % (first, second))
+
+
+# ---------------------------------------------------------------------------
+# 3b. Vocabulary capture from a photo (vision LLM)
+# ---------------------------------------------------------------------------
+# Shared with the front end (embedded verbatim into the Vocabulary panel) so
+# the scenario a photo gets tagged with always matches one of the filter
+# buttons — a model free-texting its own label would fragment the filter into
+# one-off buckets instead of a few useful ones.
+VOCAB_SCENARIOS = [
+    "General", "Food & Dining", "Sports & Fitness", "Travel & Places",
+    "Home & Daily Life", "Work & Study", "Shopping",
+    "Nature & Outdoors", "Technology", "People & Relationships",
+]
+
+VOCAB_PHOTO_PROMPT = """You are helping a Mandarin-L1 English learner build
+vocabulary from their everyday surroundings. Look at the photo and pick out
+8-15 English words and short natural phrases a fluent speaker would actually
+use to talk about what's pictured — concrete objects, actions, and the
+collocations that go with them (e.g. not just "light" but "turn on the
+light" if a light fixture is visible). Skip anything trivial (a, the, is)
+and skip anything that doesn't relate to what is actually visible.
+
+Also pick the ONE scenario/topic that best describes the whole photo, from
+this exact list: %s.
+
+Return ONLY a JSON object with this exact shape:
+
+{
+  "scenario": "one value from the list above, verbatim",
+  "items": [
+    {"headword": "the word or phrase",
+     "definition": "a short, plain English gloss or explanation",
+     "example": "one natural example sentence using it",
+     "type": "single_word | collocation | idiom | phrasal_verb"}
+  ]
+}
+
+CRITICAL OUTPUT RULES — the response must be strictly valid JSON:
+- Do NOT put a double-quote character (") inside any string value. If you must
+  quote a word, use single quotes ('like this') or write it plainly.
+- No trailing commas, no comments, no markdown fences.
+- Return ONLY the JSON object, nothing before or after it.
+""" % ", ".join('"%s"' % s for s in VOCAB_SCENARIOS)
+
+
+# kimi-k3 is Moonshot's current flagship with vision built in natively (no
+# separate "-vision-preview" model needed, unlike the older moonshot-v1-*
+# line). Override with KIMI_VISION_MODEL if your account is provisioned
+# differently — a 404 "Not found the model ... or Permission denied" from
+# Kimi means either the model name or your key/region doesn't match (see
+# KIMI_BASE_URL: api.moonshot.cn for the China platform vs api.moonshot.ai
+# for the international one — keys are not portable between the two).
+DEFAULT_KIMI_VISION_MODEL = "kimi-k3"
+
+
+def _vision_provider():
+    """DeepSeek's hosted chat API (used for grammar analysis) is text-only —
+    it has no image input — so photo vocabulary capture never uses it. Kimi
+    is preferred when a key is set (cheap, reachable from China, matching
+    this app's DeepSeek-first bias); Anthropic/Claude is the fallback."""
+    return "kimi" if os.environ.get("KIMI_API_KEY") else "anthropic"
+
+
+def vision_vocab_from_image(image_bytes, mime_type="image/jpeg"):
+    """Turn a photo into a short vocabulary list via a vision-capable LLM.
+
+    Stamps every item with the photo's one detected scenario (falling back to
+    "General" if the model drifted off the fixed list), so the Vocabulary
+    panel's scenario filter has a consistent bucket to file it under.
+    """
+    provider = _vision_provider()
+    data = (_kimi_vision_vocab(image_bytes, mime_type) if provider == "kimi"
+            else _anthropic_vision_vocab(image_bytes, mime_type))
+    if not isinstance(data, dict):
+        return []
+    scenario = data.get("scenario") if data.get("scenario") in VOCAB_SCENARIOS else "General"
+    items = data.get("items") or []
+    for it in items:
+        if isinstance(it, dict):
+            it["scenario"] = scenario
+    return items
+
+
+def _anthropic_vision_vocab(image_bytes, mime_type):
+    try:
+        import anthropic  # lazy import, mirrors _anthropic_analyze
+    except ImportError:
+        raise RuntimeError(
+            "The Anthropic library isn't installed. Install it once with:\n"
+            "    pip install anthropic")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "No Anthropic API key set. Photo vocabulary capture needs a "
+            "vision-capable model — DeepSeek's API is text-only. Add a Kimi "
+            "or Anthropic key in Settings.")
+
+    model = os.environ.get("ANTHROPIC_VISION_MODEL") or DEFAULT_ANTHROPIC_MODEL
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    try:
+        msg = client.messages.create(
+            model=model,
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": mime_type, "data": b64}},
+                    {"type": "text", "text": VOCAB_PHOTO_PROMPT},
+                ],
+            }],
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "Anthropic vision call failed (%s: %s). Check that your API key "
+            "is valid, has credits, and that model '%s' is available."
+            % (type(e).__name__, str(e)[:180], model))
+
+    text = "".join(getattr(b, "text", "") for b in (msg.content or []))
+    return _extract_json(text, "Claude vision")
+
+
+def _kimi_chat(messages, model, max_tokens=16000):
+    """One call to Moonshot's (Kimi) OpenAI-compatible chat endpoint (stdlib
+    urllib, same shape as `_deepseek_chat` above).
+
+    max_tokens defaults high because kimi-k3 can't turn reasoning off — unlike
+    DeepSeek's `thinking: disabled`, Kimi's `reasoning_effort` is currently
+    stuck at "max" — and its (hidden but token-costing) reasoning_content
+    comes out of the same budget as the visible answer. A short JSON reply
+    still needs headroom for however long the model chose to think first.
+    """
+    import urllib.request
+    import urllib.error
+
+    key = os.environ.get("KIMI_API_KEY")
+    if not key:
+        raise RuntimeError("No Kimi API key set (KIMI_API_KEY).")
+    base = (os.environ.get("KIMI_BASE_URL") or "https://api.moonshot.cn/v1").rstrip("/")
+    # No "temperature" here on purpose: reasoning models like kimi-k3 reject
+    # anything but their fixed value (1) and error on an explicit override,
+    # so omitting the field lets each model use its own default/only value.
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        base + "/chat/completions", data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + key})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:220]
+        raise RuntimeError(
+            "Kimi API call failed (HTTP %s): %s — check your key/credits, or "
+            "override the model with the KIMI_VISION_MODEL env var (current: "
+            "'%s')." % (e.code, detail, model))
+    except Exception as e:
+        raise RuntimeError("Kimi API call failed (%s: %s)."
+                           % (type(e).__name__, str(e)[:180]))
+    try:
+        choice = payload["choices"][0]
+        text = choice["message"].get("content") or ""
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError("Kimi returned an unexpected response shape: "
+                           + json.dumps(payload)[:200])
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("Kimi's reply was cut off (hit the output limit).")
+    return text
+
+
+def _kimi_vision_vocab(image_bytes, mime_type):
+    model = os.environ.get("KIMI_VISION_MODEL") or DEFAULT_KIMI_VISION_MODEL
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = "data:%s;base64,%s" % (mime_type, b64)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": data_url}},
+            {"type": "text", "text": VOCAB_PHOTO_PROMPT},
+        ],
+    }]
+    text = _kimi_chat(messages, model)
+    try:
+        return _extract_json(text, "Kimi")
+    except RuntimeError as first:
+        # same self-repair fallback as _deepseek_analyze: ask the model to fix
+        # its own near-valid JSON rather than trying to out-guess it locally.
+        fix = ("The text below is meant to be a SINGLE JSON object but has syntax "
+               "errors — unescaped double-quotes inside string values, missing "
+               "commas, or raw newlines inside strings. Return ONLY the corrected, "
+               "strictly valid JSON with the exact same content and fields: escape "
+               "any inner double-quote as \\\", add missing commas, and turn raw "
+               "newlines inside strings into spaces. Add/remove nothing else.\n\n"
+               + text)
+        try:
+            fixed = _kimi_chat([{"role": "user", "content": fix}], model)
+            return _extract_json(fixed, "Kimi")
+        except RuntimeError as second:
+            raise RuntimeError(
+                "Kimi returned malformed JSON and the repair attempt also "
                 "failed.\n  original: %s\n  repair:   %s" % (first, second))
 
 
@@ -1863,21 +2071,10 @@ _DASHBOARD_JS = """
     for(var j=0;j<btns.length;j++) btns[j].classList.toggle('active', btns[j]===b);
   });
   // ---- download a zip of the project (code and data, no media) ----
-  // Scores, review schedules and error logs live in localStorage, which the
-  // server cannot read. The page hands them over so they end up in the zip;
-  // otherwise a restore on another machine starts from zero.
+  // Scores, review schedules and error logs live server-side now (progress.json,
+  // next to history.json) so they're swept into the zip automatically — no need
+  // to ask the browser for its old localStorage copy.
   function S_esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-  function collectPracticeData(){
-    var out = {};
-    try{
-      for(var i=0;i<localStorage.length;i++){
-        var k = localStorage.key(i);
-        if(!k || k.indexOf('navsec_')===0) continue;   // UI state, not worth keeping
-        out[k] = localStorage.getItem(k);
-      }
-    }catch(_){}
-    return out;
-  }
   document.addEventListener('click', function(e){
     var b = e.target.closest ? e.target.closest('#backup-btn') : null;
     if(!b) return;
@@ -1885,8 +2082,7 @@ _DASHBOARD_JS = """
     var label = b.textContent;
     b.disabled = true; b.textContent = 'Zipping…';
     if(msg) msg.textContent = '';
-    fetch('/backup', {method:'POST', headers:{'Content-Type':'application/json'},
-                      body: JSON.stringify({practice: collectPracticeData()})}).then(function(r){
+    fetch('/backup').then(function(r){
       if(!r.ok) throw new Error('server returned ' + r.status);
       var n = r.headers.get('X-Backup-Files') || '?';
       var fn = r.headers.get('X-Backup-Name') || 'english-coach-backup.zip';
@@ -1907,7 +2103,10 @@ _DASHBOARD_JS = """
       b.disabled = false; b.textContent = label;
     });
   });
-  // ---- restore practice history from a backup's practice_data.json ----
+  // ---- restore practice history from a backup's progress.json ----
+  // Pushes straight to the server (POST /api/progress) rather than localStorage,
+  // since that's the shared source of truth now. Still accepts an old-style
+  // practice_data.json from a pre-migration backup — same {key: value} shape.
   document.addEventListener('click', function(e){
     var b = e.target.closest ? e.target.closest('#restore-btn') : null;
     if(!b) return;
@@ -1928,14 +2127,17 @@ _DASHBOARD_JS = """
       if(!keys.length){ if(msg) msg.textContent = 'No practice data in that file.'; return; }
       // merging would interleave two histories and corrupt both, so be explicit
       if(!confirm('Replace practice data with the ' + keys.length + ' entries in this file?\\n\\n' +
-                  'Current scores, review schedules and error logs on THIS browser ' +
+                  'Current scores, review schedules and error logs on the server ' +
                   'will be overwritten. This cannot be undone.')) return;
-      var n = 0;
-      keys.forEach(function(k){
-        try{ localStorage.setItem(k, data[k]); n++; }catch(_){}
+      if(msg) msg.textContent = 'Restoring…';
+      fetch('/api/progress', {method:'POST', headers:{'Content-Type':'application/json'},
+                              body: JSON.stringify(data)}).then(function(r){
+        if(!r.ok) throw new Error('server returned ' + r.status);
+        if(msg) msg.textContent = '✓ Restored ' + keys.length + ' entries — reloading…';
+        setTimeout(function(){ location.reload(); }, 900);
+      }).catch(function(err){
+        if(msg) msg.textContent = 'Restore failed: ' + err.message;
       });
-      if(msg) msg.textContent = '✓ Restored ' + n + ' entries — reloading…';
-      setTimeout(function(){ location.reload(); }, 900);
     };
     reader.readAsText(file);
   });
@@ -2295,8 +2497,49 @@ def _sound_panel():
 _SKILLS_UTIL_JS = r"""
 <script>
 window.SkillStore=(function(){
- function get(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(_){return d;}}
- function set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(_){}}
+ // ---- server-backed store (was localStorage-only — invisible across devices) ----
+ // get()/set() must stay synchronous: every panel calls them mid-render like a
+ // plain object lookup. So: hydrate a cache once at load (blocking, via a
+ // synchronous XHR — the one place that's deliberate) and have get() read that
+ // cache instantly; set() updates the cache instantly too, then persists to the
+ // server in the background. First run only: if the server has nothing yet but
+ // this browser's localStorage does (upgrading from the old client-only
+ // storage), push the local data up once to seed the server.
+ var CACHE=null;
+ function _collectLocal(){
+   var out={};
+   try{
+     for(var i=0;i<localStorage.length;i++){
+       var k=localStorage.key(i);
+       if(!k||k.indexOf('navsec_')===0) continue;  // per-device UI state, not progress
+       try{ out[k]=JSON.parse(localStorage.getItem(k)); }catch(_){ out[k]=localStorage.getItem(k); }
+     }
+   }catch(_){}
+   return out;
+ }
+ function _xhr(method,url,body){
+   try{
+     var x=new XMLHttpRequest(); x.open(method,url,false);
+     if(body!=null) x.setRequestHeader('Content-Type','application/json');
+     x.send(body!=null?JSON.stringify(body):null);
+     if(x.status>=200&&x.status<300) return JSON.parse(x.responseText);
+   }catch(_){}
+   return null;
+ }
+ (function init(){
+   var server=_xhr('GET','/api/progress');
+   if(server===null){ CACHE=_collectLocal(); return; }   // offline — local only, for this load
+   if(!Object.keys(server).length){
+     var local=_collectLocal();
+     if(Object.keys(local).length){ CACHE=local; _xhr('POST','/api/progress',local); return; }
+   }
+   CACHE=server;
+ })();
+ function get(k,d){ var v=CACHE&&CACHE[k]; return (v===undefined||v===null)?d:v; }
+ function set(k,v){ CACHE=CACHE||{}; CACHE[k]=v;
+   var body={}; body[k]=v;
+   try{ fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(function(){}); }catch(_){}
+ }
  function today(){return new Date().toISOString().slice(0,10);}
  function addDays(n){var x=new Date();x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
  function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -2360,11 +2603,58 @@ _GRADE_HTML = ("<div class='ssgrades'>Recall: "
   "<button class='btn small' style='background:#43c59e;color:#08222b' data-g='3'>Easy</button></div>")
 
 _VOCAB_JS = (r"""
-(function(){var S=window.SkillStore; var MODE='review';
+(function(){var S=window.SkillStore; var MODE='review'; var SCFILTER='all';
+ var PHOTO={blob:null, previewUrl:null, items:null, busy:false, err:''};
+ function scenarios(){ return window.VOCAB_SCENARIOS||['General']; }
  function items(){return S.get('lex_items',[]);} function save(a){S.set('lex_items',a);}
  function body(){return document.getElementById('vx-body');}
  function due(){var t=S.today(); return items().filter(function(x){return !x.srs||x.srs.due<=t;});}
- function render(){ MODE==='add'?addForm():MODE==='all'?all():review(); }
+ function render(){ MODE==='add'?addForm():MODE==='all'?all():MODE==='photo'?photoCapture():review(); }
+ // shrink a photo to a small JPEG client-side before it ever leaves the
+ // browser — keeps uploads fast and under the vision API's size limit
+ // without pulling in an image library on the Python side.
+ function downscaleImage(file,maxDim,cb){
+   var img=new Image(), url=URL.createObjectURL(file);
+   img.onload=function(){
+     URL.revokeObjectURL(url);
+     var w=img.width,h=img.height,scale=Math.min(1,maxDim/Math.max(w,h));
+     var cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
+     var cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+     cv.getContext('2d').drawImage(img,0,0,cw,ch);
+     cv.toBlob(function(blob){cb(blob);},'image/jpeg',0.85);
+   };
+   img.onerror=function(){ URL.revokeObjectURL(url); cb(null); };
+   img.src=url;
+ }
+ function photoCapture(){
+   var preview=PHOTO.previewUrl?("<img src='"+PHOTO.previewUrl+"' style='max-width:240px;border-radius:8px;display:block;margin:10px 0'>"):"";
+   var analyzeBtn=PHOTO.blob?("<button class='btn' onclick='VX.analyzePhoto()' "+(PHOTO.busy?'disabled':'')+">"+(PHOTO.busy?'Analyzing…':'🔎 Find vocabulary in this photo')+"</button>"):"";
+   var err=PHOTO.err?("<p class='hint' style='color:var(--bad)'>"+S.esc(PHOTO.err)+"</p>"):"";
+   var results='';
+   if(PHOTO.items && PHOTO.items.length){
+     results="<div style='margin-top:14px;border-top:1px solid var(--line);padding-top:10px'>"+
+       "<div style='display:flex;justify-content:space-between;align-items:center'><b>"+PHOTO.items.length+
+       " found <span class='hint' style='font-weight:400'>· "+S.esc(PHOTO.items[0].scenario||'General')+"</span></b>"+
+       "<button class='btn small' onclick='VX.addAllPhoto()'>➕ Add all</button></div>"+
+       PHOTO.items.map(function(it,i){
+         return "<div class='card' style='margin-top:8px'><div style='display:flex;justify-content:space-between;gap:8px;align-items:flex-start'>"+
+           "<div><b>"+S.esc(it.headword)+"</b> <span class='hint'>"+S.esc(it.type||'')+"</span>"+
+           "<p style='margin:4px 0'>"+S.esc(it.definition||'')+"</p>"+
+           "<p class='hint'>"+S.esc(it.example||'')+"</p></div>"+
+           "<span style='white-space:nowrap'>"+
+           "<button class='btn small' onclick='VX.addPhotoItem("+i+")'>➕ Add</button> "+
+           "<button class='btn small' onclick='VX.dropPhotoItem("+i+")'>✕</button></span></div></div>";
+       }).join('')+"</div>";
+   } else if(PHOTO.items){
+     results="<p class='hint' style='margin-top:10px'>No vocabulary found in that photo.</p>";
+   }
+   body().innerHTML="<div class='card'>"+
+     "<p class='sub' style='margin-top:0'>Take or choose a photo of what's around you. Claude looks at it and "+
+     "suggests words and phrases you'd actually use to describe it — review each one before it's added.</p>"+
+     "<input type='file' id='vx-photo-input' accept='image/*' capture='environment' style='display:none' onchange='VX.onPhotoChosen(this)'>"+
+     "<button class='btn' onclick=\"document.getElementById('vx-photo-input').click()\">📷 Take / choose photo</button> "+
+     analyzeBtn+preview+err+"</div>"+results;
+ }
  function review(){ if(!items().length){body().innerHTML="<div class='card'>No words yet. Hit Capture to add your first.</div>";return;}
    var d=due(); if(!d.length){body().innerHTML="<div class='card'>🎉 All caught up — nothing due to review.</div>";return;}
    var it=d[0];
@@ -2384,22 +2674,66 @@ _VOCAB_JS = (r"""
    "<label style='display:block;margin-top:8px'>Example<br><input id='vx-e' style='width:100%'></label>"+
    "<label style='display:block;margin-top:8px'>Type <select id='vx-t'><option>single_word</option><option>collocation</option><option>idiom</option><option>phrasal_verb</option></select></label>"+
    "<label style='display:block;margin-top:8px'>Register <select id='vx-r'><option>neutral</option><option>informal</option><option>formal</option></select></label>"+
+   "<label style='display:block;margin-top:8px'>Scenario <select id='vx-sc'>"+scenarios().map(function(s){return "<option"+(s==='General'?' selected':'')+">"+S.esc(s)+"</option>";}).join('')+"</select></label>"+
    "<button class='btn' style='margin-top:12px' onclick='VX.add()'>Save</button> <span id='vx-msg' class='hint'></span>"+
    "<div style='margin-top:14px;border-top:1px solid var(--line);padding-top:12px'>"+
    "<button class='btn small' onclick='VX.loadPack()'>📦 Load Chinglish starter pack</button> <span id='vx-pack' class='hint'></span></div></div>"; }
- function all(){ var a=items(); if(!a.length){body().innerHTML="<div class='card'>No words yet.</div>";return;}
+ function all(){ var full=items(); if(!full.length){body().innerHTML="<div class='card'>No words yet.</div>";return;}
+   var counts={all:full.length}; full.forEach(function(x){var sc=x.scenario||'General'; counts[sc]=(counts[sc]||0)+1;});
+   var present=['all'].concat(scenarios().filter(function(s){return counts[s];}));
+   if(SCFILTER!=='all' && present.indexOf(SCFILTER)<0) SCFILTER='all';
+   var fbar=present.length>2 ? "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px'>"+
+     present.map(function(s){ var label=s==='all'?'All':s;
+       return "<button class='btn small vxsc"+(SCFILTER===s?' active':'')+"' data-sc=\""+S.esc(s)+"\" onclick='VX.filterScenario(this)'>"+
+         S.esc(label)+" <span class='hint'>"+counts[s]+"</span></button>"; }).join('')+"</div>" : "";
+   var a=SCFILTER==='all'?full:full.filter(function(x){return (x.scenario||'General')===SCFILTER;});
+   if(!a.length){ body().innerHTML=fbar+"<div class='card'>No words in this scenario.</div>"; return; }
    var by={}; a.forEach(function(x){(by[x.type||'other']=by[x.type||'other']||[]).push(x);});
    var h=''; Object.keys(by).forEach(function(t){ h+="<h2>"+S.esc(t)+"</h2><table><tr><th>Word</th><th>Meaning</th><th>Example</th><th></th></tr>"+
      by[t].map(function(x){return "<tr><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+"</td><td class='hint'>"+S.esc(x.example||'')+"</td><td><button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button></td></tr>";}).join('')+"</table>";});
-   body().innerHTML=h; }
+   body().innerHTML=fbar+h; }
  window.VX={ flip:function(){var b=body().querySelector('.vxback'); if(b)b.style.display='block';},
    add:function(){var h=document.getElementById('vx-h').value.trim(); if(!h){document.getElementById('vx-msg').textContent='Headword required';return;}
-     var a=items(); a.push({id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,srs:null}); save(a);
+     var a=items(); a.push({id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,srs:null}); save(a);
      document.getElementById('vx-msg').textContent='Saved ✓'; ['vx-h','vx-d','vx-e'].forEach(function(i){document.getElementById(i).value='';}); },
    del:function(id){ save(items().filter(function(x){return x.id!==id;})); all(); },
+   filterScenario:function(btn){ SCFILTER=btn.getAttribute('data-sc'); all(); },
    loadPack:function(){ var seed=window.CHINGLISH_SEED||[]; var a=items(); var have={}; a.forEach(function(x){have[x.headword]=1;});
-     var n=0; seed.forEach(function(s){ if(!have[s.headword]){ a.push({id:S.uid(),headword:s.headword,definition:s.definition,example:s.example||'',type:s.type||'collocation',register:'neutral',srs:null}); n++; } });
-     save(a); var m=document.getElementById('vx-pack'); if(m)m.textContent='Added '+n+' chunk(s). See the All tab.'; } };
+     var n=0; seed.forEach(function(s){ if(!have[s.headword]){ a.push({id:S.uid(),headword:s.headword,definition:s.definition,example:s.example||'',type:s.type||'collocation',register:'neutral',scenario:'General',srs:null}); n++; } });
+     save(a); var m=document.getElementById('vx-pack'); if(m)m.textContent='Added '+n+' chunk(s). See the All tab.'; },
+   onPhotoChosen:function(input){
+     var file=input.files && input.files[0]; if(!file) return;
+     PHOTO.err=''; PHOTO.items=null;
+     downscaleImage(file,1024,function(blob){
+       if(!blob){ PHOTO.err='Could not read that image.'; render(); return; }
+       PHOTO.blob=blob;
+       if(PHOTO.previewUrl) URL.revokeObjectURL(PHOTO.previewUrl);
+       PHOTO.previewUrl=URL.createObjectURL(blob);
+       render();
+     });
+   },
+   analyzePhoto:function(){
+     if(!PHOTO.blob || PHOTO.busy) return;
+     PHOTO.busy=true; PHOTO.err=''; render();
+     var fd=new FormData(); fd.append('image',PHOTO.blob,'photo.jpg');
+     fetch('/vocab_photo',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
+       PHOTO.busy=false;
+       if(j.error){ PHOTO.err=j.error; render(); return; }
+       PHOTO.items=(j.items||[]).map(function(it){return {headword:it.headword||'',definition:it.definition||'',example:it.example||'',type:it.type||'collocation',scenario:it.scenario||'General'};});
+       render();
+     }).catch(function(){ PHOTO.busy=false; PHOTO.err='Could not reach the server.'; render(); });
+   },
+   addPhotoItem:function(i){
+     var it=PHOTO.items && PHOTO.items[i]; if(!it) return;
+     var a=items(); a.push({id:S.uid(),headword:it.headword,definition:it.definition,example:it.example,type:it.type,register:'neutral',scenario:it.scenario||'General',srs:null}); save(a);
+     PHOTO.items.splice(i,1); render();
+   },
+   dropPhotoItem:function(i){ if(!PHOTO.items) return; PHOTO.items.splice(i,1); render(); },
+   addAllPhoto:function(){
+     if(!PHOTO.items) return; var a=items();
+     PHOTO.items.forEach(function(it){ a.push({id:S.uid(),headword:it.headword,definition:it.definition,example:it.example,type:it.type,register:'neutral',scenario:it.scenario||'General',srs:null}); });
+     save(a); PHOTO.items=[]; render();
+   } };
  window.vxMode=function(btn){MODE=btn.getAttribute('data-m'); document.querySelectorAll('#vocab .drillnav .btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active'); render();};
  if(document.getElementById('vx-body')) render();
 })();
@@ -2641,54 +2975,12 @@ def _vocab_panel():
             "<div class='drillnav'>"
             "<button class='btn small active' data-m='review' onclick='vxMode(this)'>🃏 Review</button>"
             "<button class='btn small' data-m='add' onclick='vxMode(this)'>➕ Capture</button>"
+            "<button class='btn small' data-m='photo' onclick='vxMode(this)'>📷 From photo</button>"
             "<button class='btn small' data-m='all' onclick='vxMode(this)'>📚 All</button>"
             "</div><div id='vx-body'></div></section>"
-            "<script>window.CHINGLISH_SEED=%s;%s</script>"
-            % (json.dumps(_CHINGLISH_SEED, ensure_ascii=False).replace("</", "<\\/"), _VOCAB_JS))
-
-
-def _blindspot_chips(items):
-    """Recurring mispronounced words + word-choice habits from recordings, as
-    clickable chips (jump-to-recording + mark-mastered). Empty if none."""
-    from collections import Counter
-    words, choices = Counter(), Counter()
-    for d in items or []:
-        az = d.get("azure") or {}
-        for w in az.get("words", []):
-            if w.get("error") == "Mispronunciation":
-                tok = (w.get("word", "") or "").lower().strip(".,!?;:")
-                if tok:
-                    words[tok] += 1
-        for c in d.get("word_choice", []):
-            if c.get("note"):
-                choices[c["note"]] += 1
-    if not (words or choices):
-        return ""
-
-    def chips(counter, color, kind):
-        if not counter:
-            return "<p class='hint'>Nothing recurring yet.</p>"
-        out = []
-        for k, n in counter.most_common(8):
-            cid = kind + ":" + k
-            out.append(
-                "<span class='chip bschip' data-kind='%s' data-key=\"%s\" data-id=\"%s\" "
-                "title='Click to find it in a recording' style='color:%s'>"
-                "%s · %d×<button class='masterbtn' title='Toggle mastered' "
-                "onclick='toggleMaster(event,this)'>✓</button></span>"
-                % (kind, _attr(k), _attr(cid), color, _esc(k), n))
-        return "".join(out)
-    return ("<h2>From your recordings — pronunciation &amp; word choice</h2>"
-            "<p class='sub'>Recurring non-grammar patterns — click a chip to jump to "
-            "where it happened, or mark it mastered.</p>"
-            "<div class='bsfilter'>"
-            "<button class='btn small active' data-f='all' onclick='bsFilter(this)'>All</button>"
-            "<button class='btn small' data-f='active' onclick='bsFilter(this)'>Active</button>"
-            "<button class='btn small' data-f='mastered' onclick='bsFilter(this)'>Mastered ✓</button>"
-            "</div>"
-            "<div class='card'><b>Most-mispronounced words</b><div class='chips'>%s</div></div>"
-            "<div class='card'><b>Word-choice habits</b><div class='chips'>%s</div></div>"
-            % (chips(words, "#ff6b6b", "word"), chips(choices, "#ffb454", "note")))
+            "<script>window.CHINGLISH_SEED=%s;window.VOCAB_SCENARIOS=%s;%s</script>"
+            % (json.dumps(_CHINGLISH_SEED, ensure_ascii=False).replace("</", "<\\/"),
+               json.dumps(VOCAB_SCENARIOS, ensure_ascii=False), _VOCAB_JS))
 
 
 def _grammar_panel(items):
@@ -2713,7 +3005,6 @@ def _grammar_panel(items):
             "<button class='btn small active' data-m='log' onclick='gxMode(this)'>📋 Grammar log</button>"
             "<button class='btn small' data-m='add' onclick='gxMode(this)'>➕ Log a mistake</button>"
             "</div><div id='gx-body'></div>"
-            + _blindspot_chips(items) +
             "</section>"
             "<script>window.GRAMMAR_DATA=%s;window.GRAMMAR_SEED=%s;%s</script>"
             % (payload, seed, _GRAMMAR_JS))
@@ -3371,34 +3662,45 @@ def _mandarin_panel():
             "<script>window.ZH_DATA=%s;%s</script>" % (len(data), payload, _MANDARIN_JS))
 
 
-_STORIES_JS = r"""
+_READING_JS = r"""
 (function(){
  var S=window.SkillStore;
- function custom(){ return S.get('st_custom',[]); }
- function all(){ return (window.STORIES||[]).concat(custom()); }
- function body(){ return document.getElementById('st-body'); }
+ function all(){ return window.READING_ITEMS||[]; }
+ function body(){ return document.getElementById('reading-body'); }
+ function bestScore(key){ var a=S.scores(key); return a.length?Math.max.apply(null,a.map(function(x){return x.s;})):null; }
+ function hideHigh(){ return S.get('reading_hide90',false); }
  function render(){
    var el=body(); if(!el)return;
-   var list=all();
-   var addbar="<div class='card'><b>➕ Add a story</b>"+
-     "<label style='display:block;margin-top:6px'>Title<br><input id='st-title' style='width:100%'></label>"+
-     "<label style='display:block;margin-top:6px'>Text<br><textarea id='st-text' rows='4' style='width:100%'></textarea></label>"+
-     "<button class='btn' style='margin-top:8px' onclick='ST.add()'>Save story</button> "+
-     "<span class='hint'>or drop a .txt into the ‘Practice scripts’ folder</span></div>";
-   var cards = list.length? list.map(function(s,i){
-     var key='story:'+s.name;
-     return "<div class='card'><div style='display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center'>"+
-       "<b>"+S.esc(s.name)+(s.custom?" <span class='hint'>(yours)</span>":"")+"</b><span>"+
-       "<button class='btn small' data-say=\""+S.esc(s.text)+"\">🔊 Play</button> "+
+   var full=all();
+   var hide=hideHigh();
+   var list=full.map(function(s,i){return {s:s,i:i};}).filter(function(o){
+     if(!hide) return true;
+     var b=bestScore('reading:'+o.s.id); return !(b!=null && b>=90); });
+   var hiddenCount=full.length-list.length;
+   var toggleBtn="<button class='btn small' onclick='READ.toggleHideHigh()' style='"+
+     (hide?'background:var(--accent);color:#08222b;border-color:var(--accent)':'')+"'>"+
+     (hide?'☑':'☐')+" Hide passages scoring 90+</button>";
+   var controls=full.length>1 ? "<div style='display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px;flex-wrap:wrap'>"+
+     (hiddenCount?"<span class='hint' style='margin-right:auto'>"+hiddenCount+" hidden (score ≥ 90)</span>":"")+
+     toggleBtn+
+     "<button class='btn small' onclick='READ.expandAll(true)'>Expand all</button><button class='btn small' onclick='READ.expandAll(false)'>Collapse all</button></div>" : "";
+   var cards = list.length? list.map(function(o,idx){
+     var s=o.s, i=o.i;
+     var key='reading:'+s.id;
+     var open=idx===0;
+     return "<div class='card reading-card' data-reading='"+i+"'><div style='display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center'>"+
+       "<div><b>"+S.esc(s.name)+"</b><div class='hint'>"+S.esc(s.when||'')+" · polished from your recording</div></div><span>"+
+       "<button class='btn small' onclick='READ.toggle("+i+")' aria-expanded='"+(open?'true':'false')+"'>"+(open?'▾ Collapse':'▸ Expand')+"</button> "+
+       "<button class='btn small' data-say=\""+S.esc(s.text)+"\">🔊 Listen</button> "+
        "<button class='btn small strec' data-key=\""+S.esc(key)+"\" data-ref=\""+S.esc(s.text)+"\">● Read &amp; score</button> "+
-       "<button class='btn small' onclick='ST.use("+i+")'>➕ Use in analysis</button>"+
-       (s.custom?" <button class='btn small' style='background:#3a2029;color:#ff6b6b' onclick='ST.del("+JSON.stringify(s.name)+")'>✕</button>":"")+
+       "<button class='btn small' onclick='READ.use("+i+")'>↗ Read in speaking analysis</button>"+
        "</span></div>"+
+       "<div class='reading-detail' style='"+(open?'':'display:none;')+"'>"+
        "<div class='sthist' style='margin-top:6px'>"+S.spark(key)+"</div>"+
        "<span class='stmsg hint'></span>"+
-       "<p style='white-space:pre-wrap;margin-top:8px'>"+S.esc(s.text)+"</p></div>";
-   }).join('') : "<div class='card'>No stories yet — add one above, or drop a .txt into ‘Practice scripts’.</div>";
-   el.innerHTML=addbar+cards;
+       "<p style='white-space:pre-wrap;margin-top:8px'>"+S.esc(s.text)+"</p></div></div>";
+   }).join('') : (full.length? "<div class='card'><b>All passages scoring 90+ are hidden.</b><p class='hint'>Untick the filter above to see them.</p></div>" : "<div class='card'><b>No polished readings yet.</b><p class='hint'>Analyze an uploaded recording with grammar/word-choice feedback enabled. Its polished version will appear here automatically.</p></div>");
+   el.innerHTML=controls+cards;
  }
  // record whole-story reading -> Azure score -> log to history
  document.addEventListener('click',function(e){
@@ -3421,44 +3723,45 @@ _STORIES_JS = r"""
      mr.start(); b.classList.add('on'); b.textContent='■ Stop'; msg.textContent='Reading… tap Stop when done.';
    }).catch(function(){ msg.textContent='Mic permission denied.'; });
  });
- window.ST={
+ window.READ={
+   toggle:function(i){ var card=document.querySelector('.reading-card[data-reading="'+i+'"]'); if(!card)return;
+     var detail=card.querySelector('.reading-detail'), btn=card.querySelector('[aria-expanded]');
+     var open=detail.style.display==='none'; detail.style.display=open?'':'none';
+     btn.textContent=open?'▾ Collapse':'▸ Expand'; btn.setAttribute('aria-expanded',open?'true':'false'); },
+   expandAll:function(open){ document.querySelectorAll('.reading-card').forEach(function(card){
+     var detail=card.querySelector('.reading-detail'), btn=card.querySelector('[aria-expanded]');
+     detail.style.display=open?'':'none'; btn.textContent=open?'▾ Collapse':'▸ Expand'; btn.setAttribute('aria-expanded',open?'true':'false'); }); },
    use:function(i){ var s=all()[i]; if(!s)return; var t=document.getElementById('transcript'); if(t){ t.value=s.text; }
      var a=document.querySelector('a[data-panel=newrec]'); if(a){ a.click(); window.scrollTo(0,0); } },
-   add:function(){ var n=(document.getElementById('st-title').value||'').trim(); var tx=(document.getElementById('st-text').value||'').trim();
-     if(!n||!tx){ return; } var c=custom(); c.push({name:n,text:tx,custom:true}); S.set('st_custom',c); render(); },
-   del:function(name){ S.set('st_custom', custom().filter(function(x){return x.name!==name;})); render(); }
+   toggleHideHigh:function(){ S.set('reading_hide90', !hideHigh()); render(); }
  };
- if(document.getElementById('st-body')) render();
+ if(document.getElementById('reading-body')) render();
 })();
 """
 
 
-def _load_stories():
-    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Practice scripts")
-    out = []
-    try:
-        for fn in sorted(os.listdir(d)):
-            if fn.lower().endswith(".txt"):
-                try:
-                    with open(os.path.join(d, fn), encoding="utf-8") as f:
-                        out.append({"name": os.path.splitext(fn)[0], "text": f.read().strip()})
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return out
-
-
-def _stories_panel():
-    stories = _load_stories()
-    payload = json.dumps(stories, ensure_ascii=False).replace("</", "<\\/")
+def _reading_panel(items):
+    """Personal reading material, one polished text for each analyzed upload."""
+    readings = []
+    for i, item in enumerate(reversed(sorted(items or [], key=_sort_ts))):
+        text = (item.get("polished") or "").strip()
+        if not text:
+            continue
+        title = item.get("title") or "Recording %d" % (i + 1)
+        readings.append({
+            "id": "%s:%s" % (item.get("date", ""), title),
+            "name": title,
+            "when": _when_label(item),
+            "text": text,
+        })
+    payload = json.dumps(readings, ensure_ascii=False).replace("</", "<\\/")
     return ("<section id='stories' class='tabpanel hidden'>"
-            "<h1>Practice stories</h1>"
-            "<p class='sub'>Reading passages packed with your tricky sounds. Play one, read it "
-            "aloud, then send it to New analysis for an Azure score. Add more by dropping .txt "
-            "files into the ‘Practice scripts’ folder.</p>"
-            "<div id='st-body'></div></section>"
-            "<script>window.STORIES=%s;%s</script>" % (payload, _STORIES_JS))
+            "<h1>Reading</h1>"
+            "<p class='sub'>Your personal reading library. Every passage is the polished version "
+            "of an uploaded recording: listen, read it aloud, and score the reread against that "
+            "improved version.</p>"
+            "<div id='reading-body'></div></section>"
+            "<script>window.READING_ITEMS=%s;%s</script>" % (payload, _READING_JS))
 
 
 def _knowledge_panel():
@@ -4157,6 +4460,58 @@ window.VocabTable=function(bodyId, getRows){
 """
 
 
+_VOCAB_BARS_JS = r"""
+// A word-frequency bar list. Content words are the useful default; function
+// words remain available for fluency and sentence-pattern inspection.
+window.VocabBars=function(bodyId, getRows){
+ var S=window.SkillStore, ST={mode:'content', page:0}, PAGE_SIZE=30;
+ function data(){ return getRows()||[]; }
+ function body(){ return document.getElementById(bodyId); }
+ function rows(){
+   var r=data().filter(function(x){ return ST.mode==='all' || (ST.mode==='content' ? !x.f : x.f); });
+   return r.sort(function(a,b){ return b.n-a.n || (a.w<b.w?-1:1); });
+ }
+ function render(){
+   var el=body(); if(!el) return;
+   var all=data(), r=rows(), counts={all:all.length,content:0,function:0};
+   all.forEach(function(x){ counts[x.f?'function':'content']++; });
+   function filter(mode,label){ return "<button class='btn small vfilter' data-mode='"+mode+"' aria-pressed='"+(ST.mode===mode?'true':'false')+"'"+
+     (ST.mode===mode?" style='background:var(--accent);color:#08222b'":"")+">"+label+" <span class='hint'>"+counts[mode]+"</span></button>"; }
+   var controls="<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
+     filter('content','Content words')+filter('function','Function words')+filter('all','All words')+
+     "<span class='hint'>Click a word to hear it.</span></div>";
+   if(!r.length){ el.innerHTML=controls+"<div class='card'>No words in this group yet.</div>"; return; }
+   var pages=Math.max(1,Math.ceil(r.length/PAGE_SIZE));
+   if(ST.page>=pages) ST.page=pages-1;
+   if(ST.page<0) ST.page=0;
+   var start=ST.page*PAGE_SIZE, slice=r.slice(start,start+PAGE_SIZE);
+   var max=Math.max.apply(null,r.map(function(x){ return x.n; }));
+   var list=slice.map(function(x){
+     var pct=Math.max(2,Math.round(x.n/max*100));
+     var tone=x.f?'var(--mut)':'var(--accent)';
+     return "<div class='vbar' data-say=\""+S.esc(x.w)+"\" style='display:flex;align-items:center;gap:10px;padding:5px 2px;cursor:pointer' aria-label='"+S.esc(x.w)+", used "+x.n+" times'>"+
+       "<span style='min-width:140px;font-weight:600;color:"+tone+"'>"+S.esc(x.w)+"</span>"+
+       "<span style='flex:1;background:var(--card);border-radius:4px;overflow:hidden;height:14px'>"+
+         "<span style='display:block;height:100%;width:"+pct+"%;background:"+tone+"'></span></span>"+
+       "<span class='hint' style='min-width:36px;text-align:right'>"+x.n+"</span></div>";
+   }).join('');
+   var pager=pages>1 ? "<div style='display:flex;gap:10px;align-items:center;justify-content:center;margin:10px 2px'>"+
+     "<button class='btn small vpage' data-d='-1'"+(ST.page<=0?' disabled':'')+">◀ Prev</button>"+
+     "<span class='hint'>page "+(ST.page+1)+" of "+pages+" · "+r.length+" words</span>"+
+     "<button class='btn small vpage' data-d='1'"+(ST.page>=pages-1?' disabled':'')+">Next ▶</button></div>" : "";
+   el.innerHTML=controls+"<div style='padding:6px 0'>"+list+"</div>"+pager;
+ }
+ function wire(){ var el=body(); if(!el || el.__wired) return; el.__wired=true;
+   el.addEventListener('click',function(e){
+     var f=e.target.closest&&e.target.closest('.vfilter');
+     if(f){ ST.mode=f.getAttribute('data-mode'); ST.page=0; render(); return; }
+     var p=e.target.closest&&e.target.closest('.vpage');
+     if(p && !p.disabled){ ST.page+=parseInt(p.getAttribute('data-d'),10); render(); } }); }
+ return {render:function(){ wire(); render(); }};
+};
+"""
+
+
 def _stat(big, small, color=""):
     return ("<div class='m' style='min-width:120px'><span%s>%s</span>%s</div>"
             % ((" style='color:%s'" % color) if color else "", big, small))
@@ -4193,15 +4548,6 @@ def _speaking_vocab_panel(hidden=True):
     once = [w for w, n in counts.most_common() if n == 1][:40]
     once_html = " ".join("<span class='chip'>%s</span>" % _esc(w) for w in once)
 
-    sess_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td style='text-align:right'>%d</td>"
-        "<td style='text-align:right'>%d</td>"
-        "<td style='text-align:right'><b style='color:var(--good)'>+%d</b></td>"
-        "<td style='text-align:right'>%d</td></tr>"
-        % (_esc(s["date"]), _esc(s["title"][:46]), s["tokens"], s["types"],
-           s["new"], s["cumulative"])
-        for s in reversed(v["sessions"]))
-
     body = (
         "<h1>Speaking vocabulary</h1>"
         "<p class='sub'>Every word you've actually said, counted from the "
@@ -4218,14 +4564,13 @@ def _speaking_vocab_panel(hidden=True):
         "<p class='sub'>Words you produced a single time. These are the edge of "
         "your active vocabulary — the ones most likely to slip away unless you "
         "use them again.</p><div class='chips'>%s</div>"
-        "<h2>Every word</h2><div id='vt-speak'></div>"
-        "<h2>By recording</h2>"
-        "<table><tr><th>Date</th><th>Recording</th><th style='text-align:right'>Words</th>"
-        "<th style='text-align:right'>Distinct</th><th style='text-align:right'>New</th>"
-        "<th style='text-align:right'>Running total</th></tr>%s</table>"
+        "<h2>Word frequency</h2>"
+        "<p class='sub'>Content words are shown first because they reveal the ideas you can express. "
+        "Switch to function words when you want to inspect fluency and sentence-building habits.</p>"
+        "<div id='vt-speak'></div>"
         "<div id='vt-overlap'></div>"
         % (v["recordings"], stats, _vocab_growth_svg(v["sessions"]),
-           top_html, once_html, sess_rows))
+           top_html, once_html))
 
     overlap_js = r"""
     (function(){
@@ -4266,7 +4611,7 @@ def _speaking_vocab_panel(hidden=True):
             "<script>window.VOCAB_SPEAK=%s;\n"
             "window.addEventListener('load',function(){"
             "  if(document.getElementById('vt-speak'))"
-            "    window.VocabTable('vt-speak',function(){return window.VOCAB_SPEAK;}).render();"
+            "    window.VocabBars('vt-speak',function(){return window.VOCAB_SPEAK;}).render();"
             "});\n%s</script>"
             % (cls, body, payload, overlap_js))
 
@@ -4328,10 +4673,10 @@ _LISTEN_VOCAB_JS = r"""
      "</div>";
 
    var rows=Object.keys(counts).map(function(w){
-     return {w:w, n:counts[w], d:'', f:0, said:!!spoken[w], miss:(errs[w]||{}).n||0};
+     return {w:w, n:counts[w], d:'', f:(window.VOCAB_FUNCTION_WORDS||[]).indexOf(w)>=0?1:0, said:!!spoken[w], miss:(errs[w]||{}).n||0};
    }).sort(function(a,b){ return b.n-a.n || (a.w<b.w?-1:1); });
    window.VOCAB_LISTEN=rows.map(function(r){
-     return {w:r.w, n:r.n, f:0, d:(r.miss?('missed '+r.miss+'×'):(r.said?'also spoken':''))};
+     return {w:r.w, n:r.n, f:r.f, d:(r.miss?('missed '+r.miss+'×'):(r.said?'also spoken':''))};
    });
 
    el.innerHTML=stats+
@@ -4351,14 +4696,15 @@ _LISTEN_VOCAB_JS = r"""
         missed.slice(0,50).map(function(w){
           return "<span class='chip down'>"+S.esc(w)+" <b>"+errs[w].n+"</b></span>"; }).join('')+
         "</div>") : "")+
-     "<h2>Every word you've heard</h2><div id='vt-listen'></div>"+
+     "<h2>Word frequency</h2><p class='sub'>Content words are shown first; switch to function words to examine "
+       +"the glue words that make fast connected speech difficult.</p><div id='vt-listen'></div>"+
      "<h2>Waiting in the library</h2>"+
      "<p class='sub'><b>"+unmet.length+"</b> distinct words appear in clips you "+
      "haven't practised yet.</p><div class='chips'>"+
        unmet.slice(0,60).map(function(w){ return "<span class='chip'>"+S.esc(w)+"</span>"; }).join('')+
      "</div>";
    // the table markup only exists now, so build it after the panel is written
-   window.VocabTable('vt-listen', function(){ return window.VOCAB_LISTEN; }).render();
+   window.VocabBars('vt-listen', function(){ return window.VOCAB_LISTEN; }).render();
  });
 })();
 """
@@ -4378,9 +4724,10 @@ def _listening_vocab_panel(hidden=True):
             "recognising it is a different skill from reading it, so this is "
             "tracked separately from what you can say.</p>"
             "<div id='lv-body'></div>")
+    function_words = json.dumps(sorted(_FUNCTION_WORDS), ensure_ascii=False).replace("</", "<\\/")
     return ("<section id='vocablisten' class='%s'>%s</section>"
-            "<script>window.LISTEN_TEXTS=%s;window.SPOKEN_WORDS=%s;\n%s</script>"
-            % (cls, body, texts, spoken, _LISTEN_VOCAB_JS))
+            "<script>window.LISTEN_TEXTS=%s;window.SPOKEN_WORDS=%s;window.VOCAB_FUNCTION_WORDS=%s;\n%s</script>"
+            % (cls, body, texts, spoken, function_words, _LISTEN_VOCAB_JS))
 
 
 def _skill_panels(items):
@@ -4389,10 +4736,10 @@ def _skill_panels(items):
             # the shared table component, defined once — the speaking panel
             # renders an empty state when there are no transcripts, so it can't
             # be the thing that provides it
-            + ("<script>%s</script>" % _VOCAB_TABLE_JS)
+            + ("<script>%s</script>" % _VOCAB_BARS_JS)
             + _listening_vocab_panel() + _speaking_vocab_panel()
             + _listening_panel() + _register_panel() + _mandarin_panel()
-            + _stories_panel() + _knowledge_panel() + _howto_panel()
+            + _reading_panel(items) + _knowledge_panel() + _howto_panel()
             + _pronscore_panel())
 
 
@@ -4460,6 +4807,207 @@ def _when_label(d):
     return str(d.get("date", ""))
 
 
+def _plan_word(items):
+    """Return the most useful word-level pronunciation target, if we have one.
+
+    A word must recur before it becomes a plan item. This prevents one noisy
+    Azure result from displacing a pattern the learner has actually met again.
+    """
+    from collections import Counter
+    words = Counter()
+    for item in items or []:
+        for word in (item.get("azure") or {}).get("words", []):
+            if word.get("error") == "Mispronunciation":
+                token = (word.get("word") or "").lower().strip(".,!?;:\"'()")
+                if token:
+                    words[token] += 1
+    return words.most_common(1)[0] if words else (None, 0)
+
+
+def _plan_grammar(items):
+    """Return a stable display label for the most repeated grammar finding."""
+    from collections import Counter
+    findings = Counter()
+    for item in items or []:
+        for finding in item.get("grammar", []) or []:
+            label = (finding.get("rule") or finding.get("type") or "").strip()
+            if label:
+                findings[label] += 1
+    return findings.most_common(1)[0] if findings else (None, 0)
+
+
+def _today_panel(items, history=None):
+    """A short, deliberately finite next-practice loop.
+
+    Reports contain much more detail, but the front page should answer just one
+    question: what should I do now? The tasks point into existing panels, so no
+    duplicate scheduling store is needed.
+    """
+    items = list(items or [])
+    word, word_count = _plan_word(items)
+    grammar, grammar_count = _plan_grammar(items)
+    tasks = []
+    if word:
+        repeat = " · seen %d times" % word_count if word_count > 1 else ""
+        tasks.append(("1", "Say <b>%s</b> three times" % _esc(word),
+                      "Record it in Single-word practice%s." % repeat, "practice",
+                      "Open word practice"))
+    if grammar:
+        repeat = " · recurring in %d sessions" % grammar_count if grammar_count > 1 else ""
+        tasks.append((str(len(tasks) + 1), "Review <b>%s</b>" % _esc(grammar),
+                      "Read one correction, then say a new sentence using it%s." % repeat,
+                      "grammar", "Open error log"))
+    tasks.append((str(len(tasks) + 1), "Do one listening dictation", 
+                  "Listen once before typing. Missed words will reappear for review.",
+                  "dictation", "Start dictation"))
+    if not items:
+        tasks.insert(0, ("1", "Start your first speaking analysis",
+                         "A short 30–60 second recording is enough to create a personal plan.",
+                         "newrec", "New Speaking Analysis"))
+
+    cards = ""
+    for num, title, detail, panel, button in tasks[:3]:
+        cards += ("<div class='card' style='display:flex;gap:14px;align-items:flex-start'>"
+                  "<b style='display:grid;place-items:center;flex:0 0 30px;height:30px;"
+                  "border-radius:50%%;background:var(--accent);color:#08222b'>%s</b>"
+                  "<div style='flex:1'><b>%s</b><div class='hint' style='margin-top:4px'>%s</div>"
+                  "<button class='btn small' style='margin-top:9px' onclick=\"showPanel('%s')\">%s</button>"
+                  "</div></div>" % (num, title, detail, panel, button))
+    count = len(items)
+    context = ("Built from %d analyzed recording%s. Keep this loop small; finish it, then stop."
+               % (count, "s" if count != 1 else "")) if count else (
+               "Start with one recording. The plan will become personal once the app has evidence.")
+    return ("<h1>Today’s plan</h1><p class='sub'>%s</p>"
+            "<div style='max-width:720px'>%s</div>"
+            "<p class='hint'>Tip: a useful practice session is usually 10–15 minutes, not an hour of browsing modules.</p>"
+            % (context, cards))
+
+
+def _history_day(row):
+    """Extract a calendar day from a history row without rejecting old data."""
+    value = str(row.get("date", ""))[:10]
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+_WEEKLY_PRACTICE_JS = r"""
+(function(){
+ function iso(d){ return d.toISOString().slice(0,10); }
+ function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+ function mean(rows){ return rows.length ? Math.round(rows.reduce(function(n,x){return n+x.s;},0)/rows.length) : null; }
+ function report(prefix, label, noun, scores, start, anchor, prevStart, prevEnd){
+   var rows=[], previous=[], ids={};
+   Object.keys(scores||{}).forEach(function(key){
+     if(key.indexOf(prefix)!==0) return;
+     (scores[key]||[]).forEach(function(x){
+       if(!x || typeof x.s!=='number' || !x.d) return;
+       if(x.d>=start && x.d<=anchor){ rows.push({s:x.s,key:key}); ids[key]=1; }
+       if(x.d>=prevStart && x.d<=prevEnd) previous.push({s:x.s,key:key});
+     });
+   });
+   if(!rows.length) return "<div class='card'><b>"+label+"</b><p class='hint'>No "+noun+" practice logged this week yet.</p></div>";
+   var avg=mean(rows), old=mean(previous), delta=old==null?'—':(avg-old>0?'+':'')+(avg-old);
+   var best=Math.max.apply(null,rows.map(function(x){return x.s;}));
+   return "<div class='card'><b>"+label+"</b><div style='display:flex;gap:18px;flex-wrap:wrap;margin-top:10px'>"+
+     "<span><b style='font-size:23px'>"+rows.length+"</b><span class='hint'> attempts</span></span>"+
+     "<span><b style='font-size:23px'>"+avg+"</b><span class='hint'> average</span></span>"+
+     "<span><b style='font-size:23px'>"+best+"</b><span class='hint'> best</span></span>"+
+     "<span><b style='font-size:23px'>"+Object.keys(ids).length+"</b><span class='hint'> "+noun+"</span></span>"+
+     "<span><b style='font-size:23px'>"+delta+"</b><span class='hint'> vs. previous week</span></span></div></div>";
+ }
+ window.addEventListener('load',function(){
+   var el=document.getElementById('weekly-practice-report'); if(!el)return;
+   var anchor=window.WEEKLY_ANCHOR; if(!anchor)return;
+   var d=new Date(anchor+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-6); var start=iso(d);
+   d.setUTCDate(d.getUTCDate()-7); var prevStart=iso(d);
+   var e=new Date(start+'T12:00:00Z'); e.setUTCDate(e.getUTCDate()-1); var prevEnd=iso(e);
+   var scores=(window.SkillStore&&window.SkillStore.get('ec_scores',{}))||{};
+   el.innerHTML=report('dict:','Listening','clips',scores,start,anchor,prevStart,prevEnd)+
+                report('reading:','Reading','passages',scores,start,anchor,prevStart,prevEnd);
+ });
+})();
+"""
+
+
+def _weekly_review_panel(history, items=None, embedded=False):
+    """Compare the most recent active seven-day window to its predecessor."""
+    history = list(history or [])
+    dated = [(row, _history_day(row)) for row in history]
+    dated = [(row, day) for row, day in dated if day]
+    if not dated:
+        anchor = date.today()
+        heading = "<h2>Weekly review</h2>" if embedded else "<h1>Weekly review</h1>"
+        return (heading + "<p class='sub'>No speaking recordings this week yet.</p>"
+                "<h2>Speaking</h2><div class='card'>Analyze a recording to start your speaking review.</div>"
+                "<h2>Listening &amp; Reading</h2><div id='weekly-practice-report' class='metrics'></div>"
+                "<script>window.WEEKLY_ANCHOR=%s;%s</script>"
+                % (json.dumps(anchor.isoformat()), _WEEKLY_PRACTICE_JS))
+    anchor = max(day for _row, day in dated)
+    current_start = anchor - timedelta(days=6)
+    previous_start, previous_end = current_start - timedelta(days=7), current_start - timedelta(days=1)
+    current = [row for row, day in dated if current_start <= day <= anchor]
+    previous = [row for row, day in dated if previous_start <= day <= previous_end]
+
+    def avg(rows, key):
+        vals = [r.get(key) for r in rows if isinstance(r.get(key), (int, float))]
+        return round(sum(vals) / len(vals)) if vals else None
+
+    def duration(rows):
+        return sum(r.get("duration_sec", 0) for r in rows
+                   if isinstance(r.get("duration_sec"), (int, float)))
+
+    metrics = [("pron_score", "Overall", True), ("accuracy", "Accuracy", True),
+               ("fluency_score", "Fluency", True), ("prosody", "Prosody", True),
+               ("grammar_errors", "Grammar errors", False)]
+    rows = ""
+    for key, label, higher_is_better in metrics:
+        now, before = avg(current, key), avg(previous, key)
+        if now is None and before is None:
+            continue
+        change = "—"
+        cls = ""
+        if now is not None and before is not None:
+            diff = now - before
+            good = diff > 0 if higher_is_better else diff < 0
+            cls = "up" if good and diff else ("down" if diff else "")
+            change = "%+d" % diff
+        rows += ("<tr><td>%s</td><td>%s</td><td>%s</td><td class='%s'>%s</td></tr>"
+                 % (_esc(label), "—" if before is None else before,
+                    "—" if now is None else now, cls, change))
+    if not rows:
+        rows = "<tr><td colspan='4' class='hint'>No comparable scored metrics yet.</td></tr>"
+
+    cur_sec, prev_sec = duration(current), duration(previous)
+    word, word_count = _plan_word(items)
+    grammar, grammar_count = _plan_grammar(items)
+    focus = []
+    if word:
+        focus.append("Pronunciation: <b>%s</b>%s" % (_esc(word),
+                     " (%d occurrences)" % word_count if word_count > 1 else ""))
+    if grammar:
+        focus.append("Grammar: <b>%s</b>%s" % (_esc(grammar),
+                     " (%d occurrences)" % grammar_count if grammar_count > 1 else ""))
+    if not focus:
+        focus.append("Keep gathering evidence with a short recording and one dictation.")
+    heading = "<h2>Weekly review</h2>" if embedded else "<h1>Weekly review</h1>"
+    return (heading +
+            "<p class='sub'>Week ending <b>%s</b>, compared with %s–%s.</p>"
+            "<h2>Speaking</h2>"
+            "<div class='metrics'><div class='card'><b style='font-size:24px'>%d</b><div class='hint'>recordings this week</div></div>"
+            "<div class='card'><b style='font-size:24px'>%s</b><div class='hint'>recorded practice</div></div>"
+            "<div class='card'><b style='font-size:24px'>%s</b><div class='hint'>previous week</div></div></div>"
+            "<h2>Score movement</h2><table><tr><th>Metric</th><th>Previous</th><th>This week</th><th>Change</th></tr>%s</table>"
+            "<h2>Listening &amp; Reading</h2><div id='weekly-practice-report' class='metrics'></div>"
+            "<h2>Next week’s focus</h2><div class='card'><ul><li>%s</li></ul>"
+            "<p class='hint'>Treat score movement as a signal, not a verdict: recording length and task difficulty can change it.</p></div>"
+            "<script>window.WEEKLY_ANCHOR=%s;%s</script>"
+            % (anchor.strftime("%b %-d, %Y"), previous_start.strftime("%b %-d"), previous_end.strftime("%b %-d"),
+               len(current), _fmt_total(cur_sec) if cur_sec else "—", _fmt_total(prev_sec) if prev_sec else "—",
+               rows, "</li><li>".join(focus), json.dumps(anchor.isoformat()), _WEEKLY_PRACTICE_JS))
+
+
 def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
                             active="summary"):
     """One self-contained page: a sidebar to switch between every recording,
@@ -4481,11 +5029,9 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
         return " class='active'" if pid == active else ""
 
     nav = extra_nav
-    # Summary sits right under New analysis (added by the web nav); include it
-    # here too for the standalone/static build that has no extra_nav.
+    # Summary sits under the action-oriented views (or comes from the web nav).
     if "data-panel='summary'" not in extra_nav:
         nav += "<a data-panel='summary'%s>📈 Summary &amp; progress</a>" % acls("summary")
-    nav += "<a data-panel='stories'>📖 Practice stories</a>"
     nav += "<a data-panel='grammar'>📋 Speaking error log</a>"
     # The daily loop: what you produce, listening practice, what you missed,
     # what you took in. Kept above the first section header so they stay
@@ -4496,13 +5042,14 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     nav += "<a data-panel='listenlog'>📋 Listening error log</a>"
     nav += ("<a data-panel='vocablisten'>🎧 Listening vocabulary"
             "<small>what you take in</small></a>")
+    nav += "<a data-panel='stories'>📖 Reading</a>"
+    nav += "<a data-panel='vocab'>📇 Vocabulary</a>"
     nav += "<p class='navsec'>Train — ear &amp; sound</p>"
     nav += "<a data-panel='howto'>📣 How-to: tricky words</a>"
     nav += "<a data-panel='listening'>🔉 Listening (ear training)</a>"
     nav += "<a data-panel='drills'%s>🎧 Sound system</a>" % acls("drills")
     nav += "<a data-panel='mandarin'>🗣️ 中→EN Pronunciation</a>"
     nav += "<p class='navsec'>Train — words &amp; usage</p>"
-    nav += "<a data-panel='vocab'>📇 Vocabulary</a>"
     nav += "<a data-panel='register'>🎭 Register</a>"
     nav += "<p class='navsec'>Reference — read &amp; understand</p>"
     nav += "<a data-panel='knowledge'>📕 Vowels &amp; consonants 101</a>"
@@ -5343,7 +5890,9 @@ Backup taken %(when)s — %(files)d files.
 - All source, data files, notes and practice scripts
 - Your transcripts, per-recording analyses and `history.json` (%(analysis)d files)
   — so the progress curve, the vocabulary reports and every past report come back
-- `practice_data.json` — %(practice)s
+- `VideoAudioFiles/progress.json` — scores, review schedules and error logs
+  (Vocabulary, Practice words, Grammar log, Listening, ear training). Server-side
+  now, so it's just another data file here, not something only a browser has.
 
 ## What is NOT in here, and why
 
@@ -5363,9 +5912,9 @@ new analyses need the corresponding piece.
 2. `pip install -r requirements.txt`
 3. `python english_coach_web.py` → http://localhost:8000
 4. Restore your practice history: open **Summary & progress**, click
-   **Restore practice data**, and choose the `practice_data.json` from this zip.
-   This has to be done through the browser — scores, review schedules and error
-   logs live in the browser's own storage, which no file on disk can reach.
+   **Restore practice data**, and choose `VideoAudioFiles/progress.json` from
+   this zip. This pushes it to the server (`POST /api/progress`), replacing
+   whatever's already there — it's no longer trapped in one browser's storage.
 5. Optional: re-enter your Azure and DeepSeek keys in **New analysis** to run
    new recordings.
 
@@ -5376,12 +5925,12 @@ new analyses need the corresponding piece.
 """
 
 
-def build_project_backup(root=None, practice_data=None):
+def build_project_backup(root=None):
     """Zip the project in memory. Returns (bytes, filename, member count).
 
-    `practice_data` is the browser's localStorage, handed over by the page —
-    the server cannot read it, and without it a restore loses every score,
-    review schedule and error log.
+    Scores/schedules/error logs live in VideoAudioFiles/progress.json now, so
+    _backup_members() already picks it up like any other data file — nothing
+    special to collect here.
     """
     import datetime
     import io
@@ -5394,14 +5943,6 @@ def build_project_backup(root=None, practice_data=None):
     name = "%s-backup-%s.zip" % (folder, stamp)
 
     analysis = sum(1 for _p, a in members if a.split(os.sep)[0] == LIBRARY_NAME)
-    if practice_data:
-        keys = len(practice_data)
-        practice = ("your practice history: %d keys (scores, review schedules, "
-                    "error logs). See step 4." % keys)
-    else:
-        practice = ("NOT captured — the backup was made without the browser "
-                    "handing over its storage, so scores and schedules are not "
-                    "in this zip.")
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -5412,13 +5953,9 @@ def build_project_backup(root=None, practice_data=None):
                 continue
         z.writestr(os.path.join(folder, "RESTORE.md"), _RESTORE_TEMPLATE % {
             "when": now.strftime("%Y-%m-%d %H:%M"),
-            "files": len(members) + (1 if practice_data else 0),
+            "files": len(members),
             "analysis": analysis,
-            "practice": practice,
         })
-        if practice_data:
-            z.writestr(os.path.join(folder, "practice_data.json"),
-                       json.dumps(practice_data, ensure_ascii=False, indent=1))
     return buf.getvalue(), name, len(members)
 
 
@@ -5445,18 +5982,18 @@ def _backup_card():
             "<button class='btn small' id='restore-btn'>&#8635; Restore practice data</button>"
             "<input type='file' id='restore-file' accept='.json' style='display:none'>"
             "<span class='hint' id='restore-msg' style='margin-left:10px'>"
-            "On a new machine, load <code>practice_data.json</code> from a backup "
-            "to bring back scores, review schedules and error logs.</span></div>"
+            "Load <code>VideoAudioFiles/progress.json</code> from a backup to push "
+            "scores, review schedules and error logs to the server.</span></div>"
             "</div>" % (s["files"], _fmt_bytes(s["bytes"])))
 
 
 def _summary_panel(history, items=None, rec_ids=None):
-    """The Summary tab: goal + before/after up top (stay visible as the session
-    table grows), then the session table. Recurring blind spots now live in the
-    Error-log module, so the page ends cleanly at the table."""
-    return (_progress_body(history, items, top_extra=_goal_and_compare(history),
-                           rec_ids=rec_ids)
-            + _backup_card())
+    """Combined weekly review and long-term progress; no separate report page."""
+    return ("<h1>Summary &amp; progress</h1>"
+            + _weekly_review_panel(history, items, embedded=True)
+            + "<hr style='border:0;border-top:1px solid var(--line);margin:36px 0'>"
+            + _progress_body(history, items, top_extra=_goal_and_compare(history),
+                             rec_ids=rec_ids))
 
 
 def generate_progress_html(history):

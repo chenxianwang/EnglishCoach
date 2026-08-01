@@ -29,5 +29,11 @@ sherpa-onnx>=1.9
 
 # --- grammar analysis providers -------------------------------------------
 # DeepSeek is the default and needs NO package (it is called over stdlib
-# urllib). Install this only if you want to use Anthropic instead.
+# urllib). Install this if you want to use Anthropic/Claude instead for
+# grammar analysis, or as the vision fallback below.
 # anthropic>=0.40
+
+# --- vocabulary from a photo (vision LLM) ----------------------------------
+# DeepSeek's API is text-only, so the Vocabulary panel's "From photo" capture
+# uses Kimi (Moonshot AI) if KIMI_API_KEY is set, else Anthropic above.
+# Kimi needs NO package — called over stdlib urllib, same as DeepSeek.
