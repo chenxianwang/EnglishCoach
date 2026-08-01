@@ -113,6 +113,11 @@ def save_config(cfg):
 # localStorage (device-only, invisible from a second browser/device). Stored
 # next to history.json so it rides along with the recordings it's about.
 PROGRESS_PATH = os.path.join(LIBRARY, "progress.json")
+# Guards the read-modify-write below. The Flask dev server runs threaded, so
+# two near-simultaneous saves (e.g. two tabs/devices) could otherwise both
+# read the same old state and the second write silently discards the first's
+# keys — this serializes them so every write starts from the latest commit.
+_progress_lock = threading.Lock()
 
 
 def load_progress():
@@ -124,10 +129,20 @@ def load_progress():
 
 
 def save_progress(data):
+    """Atomic write (temp file + rename) — a plain open(...,'w') truncates the
+    file before writing the new content, so a GET landing in that window would
+    see an empty/partial file and load_progress() would report "no data yet".
+    A client seeing that false-empty signal would then treat itself as the
+    first-ever sync and push its own (possibly smaller) local snapshot up,
+    silently wiping out whatever richer data was mid-write. This is exactly
+    what happened once already — os.replace() is atomic, so a reader always
+    sees either the fully-old or fully-new file, never a truncated one."""
     try:
         os.makedirs(os.path.dirname(PROGRESS_PATH), exist_ok=True)
-        with open(PROGRESS_PATH, "w", encoding="utf-8") as f:
+        tmp = PROGRESS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, PROGRESS_PATH)
     except Exception:
         pass
 
@@ -143,9 +158,10 @@ def api_progress():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify(error="expected a JSON object"), 400
-    data = load_progress()
-    data.update(payload)
-    save_progress(data)
+    with _progress_lock:
+        data = load_progress()
+        data.update(payload)
+        save_progress(data)
     return jsonify(ok=True)
 
 

@@ -2526,15 +2526,42 @@ window.SkillStore=(function(){
    }catch(_){}
    return null;
  }
+ // One flaky request here must never look like "your progress is gone" — a
+ // transient network hiccup during the ONE hydration call at page load would
+ // otherwise silently fall back to an empty cache, indistinguishable from
+ // actual data loss. Retry before giving up.
+ function _xhrRetry(method,url,body,tries){
+   tries=tries||3;
+   for(var i=0;i<tries;i++){ var r=_xhr(method,url,body); if(r!==null) return r; }
+   return null;
+ }
+ var HYDRATE_FAILED=false;
  (function init(){
-   var server=_xhr('GET','/api/progress');
-   if(server===null){ CACHE=_collectLocal(); return; }   // offline — local only, for this load
+   var server=_xhrRetry('GET','/api/progress');
+   if(server===null){
+     HYDRATE_FAILED=true;   // couldn't reach the server even after retries
+     CACHE=_collectLocal();
+     return;
+   }
    if(!Object.keys(server).length){
      var local=_collectLocal();
-     if(Object.keys(local).length){ CACHE=local; _xhr('POST','/api/progress',local); return; }
+     if(Object.keys(local).length){ CACHE=local; _xhrRetry('POST','/api/progress',local); return; }
    }
    CACHE=server;
  })();
+ if(HYDRATE_FAILED){
+   document.addEventListener('DOMContentLoaded', function(){
+     try{
+       var b=document.createElement('div');
+       b.textContent='⚠️ Could not reach the server just now — showing whatever is cached on '+
+         'this device. Nothing is deleted; reload the page once you are back online to see '+
+         'your real progress.';
+       b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#3a2030;'+
+         'color:#ff9db0;padding:10px 16px;font-size:13px;text-align:center';
+       document.body.insertBefore(b, document.body.firstChild);
+     }catch(_){}
+   });
+ }
  function get(k,d){ var v=CACHE&&CACHE[k]; return (v===undefined||v===null)?d:v; }
  function set(k,v){ CACHE=CACHE||{}; CACHE[k]=v;
    var body={}; body[k]=v;
@@ -4465,10 +4492,19 @@ _VOCAB_BARS_JS = r"""
 // words remain available for fluency and sentence-pattern inspection.
 window.VocabBars=function(bodyId, getRows){
  var S=window.SkillStore, ST={mode:'content', page:0}, PAGE_SIZE=30;
+ // Skip list — per panel (bodyId), server-synced like everything else now.
+ // For names and other one-off words that dominate the count but aren't
+ // vocabulary worth tracking (a person's name said 17 times isn't a word
+ // you're learning).
+ var SKKEY='skipwords:'+bodyId;
+ function skipList(){ return S.get(SKKEY,[])||[]; }
+ function isSkipped(w){ var lw=w.toLowerCase(); return skipList().some(function(s){return s.toLowerCase()===lw;}); }
+ function addSkip(w){ var l=skipList(); if(!isSkipped(w)){ l.push(w); S.set(SKKEY,l); } }
+ function removeSkip(w){ var lw=w.toLowerCase(); S.set(SKKEY, skipList().filter(function(s){return s.toLowerCase()!==lw;})); }
  function data(){ return getRows()||[]; }
  function body(){ return document.getElementById(bodyId); }
  function rows(){
-   var r=data().filter(function(x){ return ST.mode==='all' || (ST.mode==='content' ? !x.f : x.f); });
+   var r=data().filter(function(x){ return (ST.mode==='all' || (ST.mode==='content' ? !x.f : x.f)) && !isSkipped(x.w); });
    return r.sort(function(a,b){ return b.n-a.n || (a.w<b.w?-1:1); });
  }
  function render(){
@@ -4477,9 +4513,13 @@ window.VocabBars=function(bodyId, getRows){
    all.forEach(function(x){ counts[x.f?'function':'content']++; });
    function filter(mode,label){ return "<button class='btn small vfilter' data-mode='"+mode+"' aria-pressed='"+(ST.mode===mode?'true':'false')+"'"+
      (ST.mode===mode?" style='background:var(--accent);color:#08222b'":"")+">"+label+" <span class='hint'>"+counts[mode]+"</span></button>"; }
+   var skip=skipList();
+   var skipBar=skip.length?("<div style='margin:6px 2px' class='hint'>Skip words: "+
+     skip.map(function(w){return "<span class='chip vskip' data-w=\""+S.esc(w)+"\" style='cursor:pointer;margin-right:4px' title='Click to unskip'>"+S.esc(w)+" ✕</span>";}).join(' ')+
+     "</div>") : "";
    var controls="<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
      filter('content','Content words')+filter('function','Function words')+filter('all','All words')+
-     "<span class='hint'>Click a word to hear it.</span></div>";
+     "<span class='hint'>Click a word to hear it.</span></div>"+skipBar;
    if(!r.length){ el.innerHTML=controls+"<div class='card'>No words in this group yet.</div>"; return; }
    var pages=Math.max(1,Math.ceil(r.length/PAGE_SIZE));
    if(ST.page>=pages) ST.page=pages-1;
@@ -4489,11 +4529,12 @@ window.VocabBars=function(bodyId, getRows){
    var list=slice.map(function(x){
      var pct=Math.max(2,Math.round(x.n/max*100));
      var tone=x.f?'var(--mut)':'var(--accent)';
-     return "<div class='vbar' data-say=\""+S.esc(x.w)+"\" style='display:flex;align-items:center;gap:10px;padding:5px 2px;cursor:pointer' aria-label='"+S.esc(x.w)+", used "+x.n+" times'>"+
-       "<span style='min-width:140px;font-weight:600;color:"+tone+"'>"+S.esc(x.w)+"</span>"+
+     return "<div class='vbar' style='display:flex;align-items:center;gap:10px;padding:5px 2px' aria-label='"+S.esc(x.w)+", used "+x.n+" times'>"+
+       "<span data-say=\""+S.esc(x.w)+"\" style='min-width:140px;font-weight:600;color:"+tone+";cursor:pointer'>"+S.esc(x.w)+"</span>"+
        "<span style='flex:1;background:var(--card);border-radius:4px;overflow:hidden;height:14px'>"+
          "<span style='display:block;height:100%;width:"+pct+"%;background:"+tone+"'></span></span>"+
-       "<span class='hint' style='min-width:36px;text-align:right'>"+x.n+"</span></div>";
+       "<span class='hint' style='min-width:36px;text-align:right'>"+x.n+"</span>"+
+       "<button class='btn small vbar-skip' data-w=\""+S.esc(x.w)+"\" title='Skip this word' style='padding:2px 7px'>🚫</button></div>";
    }).join('');
    var pager=pages>1 ? "<div style='display:flex;gap:10px;align-items:center;justify-content:center;margin:10px 2px'>"+
      "<button class='btn small vpage' data-d='-1'"+(ST.page<=0?' disabled':'')+">◀ Prev</button>"+
@@ -4506,7 +4547,11 @@ window.VocabBars=function(bodyId, getRows){
      var f=e.target.closest&&e.target.closest('.vfilter');
      if(f){ ST.mode=f.getAttribute('data-mode'); ST.page=0; render(); return; }
      var p=e.target.closest&&e.target.closest('.vpage');
-     if(p && !p.disabled){ ST.page+=parseInt(p.getAttribute('data-d'),10); render(); } }); }
+     if(p && !p.disabled){ ST.page+=parseInt(p.getAttribute('data-d'),10); render(); return; }
+     var sk=e.target.closest&&e.target.closest('.vbar-skip');
+     if(sk){ addSkip(sk.getAttribute('data-w')); render(); return; }
+     var un=e.target.closest&&e.target.closest('.vskip');
+     if(un){ removeSkip(un.getAttribute('data-w')); render(); return; } }); }
  return {render:function(){ wire(); render(); }};
 };
 """
