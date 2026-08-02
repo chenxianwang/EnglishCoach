@@ -1259,11 +1259,21 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
                         if dur is not None:
                             timings.append((off, dur))
                 wa = _num(getattr(w, "accuracy_score", None))
+                # The phoneme sequence Azure expected for this word — i.e. what
+                # it actually graded you against. Worth keeping: Azure's lexicon
+                # is occasionally just wrong (it expects "tied" as /t iy d/,
+                # "teed"), and without this there is no way to tell a genuine
+                # mispronunciation from being marked against the wrong target.
+                phones = []
+                if i < len(json_words):
+                    phones = [p.get("Phoneme") for p in
+                              (json_words[i].get("Phonemes") or []) if p.get("Phoneme")]
                 words.append({
                     "word": w.word,
                     "accuracy": 0 if wa is None else max(0, min(100, round(wa))),
                     "error": w.error_type if w.error_type != "None" else "",
                     "t": start,   # start time in seconds, for click-to-play
+                    "phones": phones,
                 })
         except Exception as e:
             skipped.append("words: %s" % str(e)[:100])
@@ -2043,16 +2053,17 @@ _DASHBOARD_JS = """
     var S=window.SkillStore;
     if(!raw || !S){ return; }
     var words=raw.split(/\\s+/).filter(Boolean);
-    var cur=S.get('pw_custom',[])||[];
-    var have={}; cur.forEach(function(w){ have[(''+w).toLowerCase()]=1; });
     var added=0;
-    words.forEach(function(w){ var lw=(''+w).toLowerCase();
-      if(!have[lw]){ have[lw]=1; cur.push(lw); added++; } });
-    S.set('pw_custom',cur);
+    // update() re-reads the server first, so this can't clobber words added
+    // from another tab or device since this page loaded
+    S.update('pw_custom',[],function(cur){ cur=(cur||[]).slice();
+      var have={}; cur.forEach(function(w){ have[(''+w).toLowerCase()]=1; });
+      words.forEach(function(w){ var lw=(''+w).toLowerCase();
+        if(!have[lw]){ have[lw]=1; cur.push(lw); added++; } });
+      return cur; });
     // if any were previously removed/hidden, bring them back
-    var hid=S.get('pw_hidden',[])||[];
-    if(hid.length){ S.set('pw_hidden', hid.filter(function(h){
-      return words.indexOf((''+h).toLowerCase())<0; })); }
+    S.update('pw_hidden',[],function(hid){ return (hid||[]).filter(function(h){
+      return words.indexOf((''+h).toLowerCase())<0; }); });
     btn.textContent = added>0 ? ('\\u2713 Added '+added+' to Practice single word')
                               : '\\u2713 Already in Practice';
     btn.disabled=true; btn.style.opacity='.7';
@@ -2130,8 +2141,13 @@ _DASHBOARD_JS = """
                   'Current scores, review schedules and error logs on the server ' +
                   'will be overwritten. This cannot be undone.')) return;
       if(msg) msg.textContent = 'Restoring…';
+      // __replace: the server normally MERGES score history (so a stale tab can
+      // never delete attempts) — but a restore promises replacement above, so
+      // it has to opt out of that, key by key, or the confirm text would lie.
+      var body = {}; keys.forEach(function(k){ body[k] = data[k]; });
+      body.__replace = keys;
       fetch('/api/progress', {method:'POST', headers:{'Content-Type':'application/json'},
-                              body: JSON.stringify(data)}).then(function(r){
+                              body: JSON.stringify(body)}).then(function(r){
         if(!r.ok) throw new Error('server returned ' + r.status);
         if(msg) msg.textContent = '✓ Restored ' + keys.length + ' entries — reloading…';
         setTimeout(function(){ location.reload(); }, 900);
@@ -2563,9 +2579,20 @@ window.SkillStore=(function(){
    });
  }
  function get(k,d){ var v=CACHE&&CACHE[k]; return (v===undefined||v===null)?d:v; }
- function set(k,v){ CACHE=CACHE||{}; CACHE[k]=v;
+ function set(k,v,replace){ CACHE=CACHE||{}; CACHE[k]=v;
    var body={}; body[k]=v;
+   if(replace) body.__replace=[k];   // "delete this", not "here's my snapshot"
    try{ fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(function(){}); }catch(_){}
+ }
+ // Read-modify-write on a key that the server can only replace wholesale
+ // (pw_custom, pw_hidden, …). CACHE is hydrated once at page load, so a tab
+ // left open while you add words on another device would otherwise POST its
+ // stale list and drop them. Re-read the server first, mutate that, write back.
+ function update(k,d,fn){
+   var fresh=_xhrRetry('GET','/api/progress');
+   if(fresh){ CACHE=fresh; }
+   var cur=get(k,d);
+   set(k, fn(cur));
  }
  function today(){return new Date().toISOString().slice(0,10);}
  function addDays(n){var x=new Date();x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
@@ -2595,7 +2622,12 @@ window.SkillStore=(function(){
    } else { webSpeak(t,rate); } }
  function norm(s){ return (s||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim(); }
  // ---- score history (shared by Practice words + Stories) ----
- function logScore(key,score){ var h=get('ec_scores',{}); (h[key]=h[key]||[]).push({s:score,d:today()}); set('ec_scores',h); }
+ // Each attempt carries `i`, a unique id, so the server can tell two real
+ // attempts apart even when they're the same score on the same day — without
+ // it they're byte-identical and the merge used to silently drop one.
+ function logScore(key,score){ var h=get('ec_scores',{});
+   (h[key]=h[key]||[]).push({s:score,d:today(),i:uid()+Date.now().toString(36)});
+   set('ec_scores',h); }
  function scores(key){ return (get('ec_scores',{})[key])||[]; }
  function spark(key){ var a=scores(key); if(!a.length) return "<span class='hint'>no attempts yet</span>";
    var last=a[a.length-1].s, best=Math.max.apply(null,a.map(function(x){return x.s;}));
@@ -2605,7 +2637,7 @@ window.SkillStore=(function(){
  // warm up the voice list so the first Play isn't silent
  try{ window.speechSynthesis && window.speechSynthesis.getVoices();
    if(window.speechSynthesis) window.speechSynthesis.onvoiceschanged=function(){window.speechSynthesis.getVoices();}; }catch(_){}
- return {get:get,set:set,today:today,addDays:addDays,esc:esc,uid:uid,schedule:schedule,speak:speak,norm:norm,logScore:logScore,scores:scores,spark:spark};
+ return {get:get,set:set,update:update,today:today,addDays:addDays,esc:esc,uid:uid,schedule:schedule,speak:speak,norm:norm,logScore:logScore,scores:scores,spark:spark};
 })();
 // generic TTS play via data-say (shared across skill panels)
 document.addEventListener('click',function(e){
@@ -3064,9 +3096,7 @@ _ONSETS = {"pl", "pr", "bl", "br", "tr", "dr", "kl", "kr", "ɡl", "ɡr", "tw", "
            "tj", "dj", "spl", "spr", "str", "skr", "skw", "spj", "stj", "skj"}
 
 
-def word_ipa(word):
-    """Best-effort IPA for an English word via CMUdict (offline), with primary/
-    secondary stress marks on words of 2+ syllables. '' if unknown."""
+def _cmu():
     global _CMU
     if _CMU is None:
         try:
@@ -3074,6 +3104,156 @@ def word_ipa(word):
             _CMU = cmudict.dict()
         except Exception:
             _CMU = {}
+    return _CMU
+
+
+def cmu_arpabets(word, keep_stress=False):
+    """Every pronunciation CMUdict lists for `word`, most common first.
+
+    Heteronyms genuinely have more than one — "live" is /laɪv/ AND /lɪv/, and so
+    are read, wind, lead, bow, close. Anything judging Azure against "the"
+    pronunciation of a word has to consider all of them or it will call a
+    perfectly good reading wrong.
+    """
+    variants = _cmu().get(re.sub(r"[^a-z']", "", (word or "").lower())) or []
+    return [[p.lower() if keep_stress else re.sub(r"\d", "", p).lower() for p in v]
+            for v in variants]
+
+
+def cmu_arpabet(word, keep_stress=False):
+    """CMUdict's primary pronunciation for `word`. [] if unknown."""
+    variants = cmu_arpabets(word, keep_stress)
+    return variants[0] if variants else []
+
+
+# Azure and CMUdict describe the same mouth differently, and separating those
+# notational gaps from real disagreements is the whole job of
+# azure_lexicon_disagrees(). Everything folded here is a difference no listener
+# would call a different word:
+#   * reduced vowels — CMUdict AH0/IH0, Azure "ax", both schwa
+#   * weak forms — "for" as /fɔːr/ (CMUdict) or /fər/ (Azure); "that", "them"
+#   * syllabic consonants — "towel" as /taʊəl/ or /taʊl/, "I'll" either way
+#   * pre-r vowels — /ʊr/~/ɜr/~/ɔr/ vary by dialect ("during", "are", "for")
+#   * father/strut and cot/caught, which not every US accent separates
+_ARPA_LOW = {"aa", "ao", "ah"}          # -> one low/central class
+_ARPA_VOWELS = {"a", "ay", "iy", "ey", "ow", "uw", "aw", "oy", "ae", "eh",
+                "ih", "uh", "er", "R", "@"}
+
+
+def _norm_arpa(seq):
+    """Fold one phoneme sequence into the comparison alphabet described above."""
+    out = []
+    for raw in seq or []:
+        p = (raw or "").lower()
+        stress = p[-1] if p and p[-1].isdigit() else ""
+        p = re.sub(r"\d", "", p)
+        if not p:
+            continue
+        if p in ("ax", "axr") or (p in ("ah", "ih") and stress == "0"):
+            p = "@" if p != "axr" else "er"
+        elif p in _ARPA_LOW:
+            p = "a"
+        out.append(p)
+    # collapse any vowel + /r/ into one r-coloured slot
+    folded = []
+    for p in out:
+        if p == "r" and folded and (folded[-1] in _ARPA_VOWELS or folded[-1] == "R"):
+            folded[-1] = "R"
+            continue
+        folded.append("R" if p == "er" else p)
+    return folded
+
+
+def _phones_equivalent(a, b):
+    """Can these two sequences describe the same utterance?
+
+    A schwa matches any vowel, and may be present on one side only — that is
+    what makes weak forms and syllabic consonants compare equal. Everything
+    else has to line up exactly.
+    """
+    from functools import lru_cache
+
+    @lru_cache(maxsize=None)
+    def reach(i, j):
+        if i == len(a) and j == len(b):
+            return True
+        if i < len(a) and j < len(b):
+            x, y = a[i], b[j]
+            if x == y and reach(i + 1, j + 1):
+                return True
+            if ((x == "@" and y in _ARPA_VOWELS) or
+                    (y == "@" and x in _ARPA_VOWELS)) and reach(i + 1, j + 1):
+                return True
+        if i < len(a) and a[i] == "@" and reach(i + 1, j):
+            return True
+        if j < len(b) and b[j] == "@" and reach(i, j + 1):
+            return True
+        return False
+
+    return reach(0, 0)
+
+
+def azure_lexicon_disagrees(word, azure_phones):
+    """True when Azure graded `word` against a genuinely different pronunciation
+    than CMUdict (and this app's own IPA display) gives.
+
+    This is not hypothetical. Azure's lexicon has "tied" as /t iy d/ ("teed"),
+    so saying it correctly as /taɪd/ scores the vowel 44 and the word 64, while
+    the homophone "tide" scores 100 on the very same audio. Anything flagged
+    here means the number describes Azure's dictionary, not your mouth.
+
+    `azure_phones` must come from assessing the ACTUAL attempt: where Azure
+    holds several pronunciations it returns whichever best matches the audio
+    (say the noun "mouth" and it grades /maʊθ/, not the verb's /maʊð/). So a
+    flag means Azure had no reading of this spelling that matches the word —
+    not merely that it picked a different one from CMUdict's first entry.
+
+    Returns False when either side is unknown — never guess.
+    """
+    theirs = _norm_arpa(azure_phones)
+    variants = cmu_arpabets(word, keep_stress=True)
+    if not theirs or not variants:
+        return False
+    # a heteronym is only wrong if it matches NONE of its readings
+    for v in variants:
+        ours = _norm_arpa(v)
+        if ours and _phones_equivalent(tuple(ours), tuple(theirs)):
+            return False
+    return True
+
+
+_HOMOPHONES = None
+
+
+def cmu_homophone(word):
+    """A different spelling with the identical CMUdict pronunciation, or ''.
+
+    Used to re-score a word whose Azure lexicon entry is broken: "tied" grades
+    wrongly, "tide" grades correctly, and they are the same sound — so the
+    honest score for "tied" is the one Azure gives for "tide".
+    """
+    global _HOMOPHONES
+    key = tuple(cmu_arpabet(word))
+    if not key:
+        return ""
+    if _HOMOPHONES is None:
+        _HOMOPHONES = {}
+        for w, prons in _cmu().items():
+            if not prons or "'" in w or not w.isalpha():
+                continue
+            k = tuple(re.sub(r"\d", "", p).lower() for p in prons[0])
+            _HOMOPHONES.setdefault(k, []).append(w)
+    lw = (word or "").lower()
+    # shortest first, then alphabetical — favours the plain, common spelling
+    alts = sorted((w for w in _HOMOPHONES.get(key, ()) if w != lw),
+                  key=lambda w: (len(w), w))
+    return alts[0] if alts else ""
+
+
+def word_ipa(word):
+    """Best-effort IPA for an English word via CMUdict (offline), with primary/
+    secondary stress marks on words of 2+ syllables. '' if unknown."""
+    _cmu()
     w = re.sub(r"[^a-z']", "", (word or "").lower())
     phones = _CMU.get(w)
     if not phones:
@@ -3489,13 +3669,14 @@ _LISTENLOG_JS = r"""
    if((b=t.closest('#llog-drill'))){
      var words=rows().filter(function(x){return x.n>1;}).map(function(x){return x.word;});
      if(!words.length){ alert('Nothing has been missed more than once yet.'); return; }
-     var cur=S.get('pw_custom',[])||[], have={};
-     cur.forEach(function(w){ have[(''+w).toLowerCase()]=1; });
      var added=0;
-     words.forEach(function(w){ if(!have[w]){ have[w]=1; cur.push(w); added++; } });
-     S.set('pw_custom',cur);
-     var hid=S.get('pw_hidden',[])||[];
-     if(hid.length) S.set('pw_hidden', hid.filter(function(h){ return words.indexOf((''+h).toLowerCase())<0; }));
+     S.update('pw_custom',[],function(cur){ cur=(cur||[]).slice(); var have={};
+       cur.forEach(function(w){ have[(''+w).toLowerCase()]=1; });
+       words.forEach(function(w){ var lw=(''+w).toLowerCase();
+         if(!have[lw]){ have[lw]=1; cur.push(w); added++; } });
+       return cur; });
+     S.update('pw_hidden',[],function(hid){ return (hid||[]).filter(function(h){
+       return words.indexOf((''+h).toLowerCase())<0; }); });
      b.textContent = added ? ('✓ Added '+added+' to Practice single word') : '✓ Already there';
      b.disabled=true; return; }
  });
@@ -4942,7 +5123,28 @@ _WEEKLY_PRACTICE_JS = r"""
  function iso(d){ return d.toISOString().slice(0,10); }
  function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
  function mean(rows){ return rows.length ? Math.round(rows.reduce(function(n,x){return n+x.s;},0)/rows.length) : null; }
- function report(prefix, label, noun, scores, start, anchor, prevStart, prevEnd){
+ var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+ function pretty(d){ var p=String(d).split('-'); return MON[+p[1]-1]+' '+(+p[2]); }
+ // The four dates that define "this week" and the week before it.
+ function windows(anchor){
+   var d=new Date(anchor+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-6); var start=iso(d);
+   d.setUTCDate(d.getUTCDate()-7); var prevStart=iso(d);
+   var e=new Date(start+'T12:00:00Z'); e.setUTCDate(e.getUTCDate()-1); var prevEnd=iso(e);
+   return {start:start, anchor:anchor, prevStart:prevStart, prevEnd:prevEnd};
+ }
+ // Latest day on which anything under these key prefixes was practised.
+ function lastPractised(scores, prefixes){
+   var m='';
+   Object.keys(scores||{}).forEach(function(key){
+     var hit=false;
+     for(var i=0;i<prefixes.length;i++){ if(key.indexOf(prefixes[i])===0){ hit=true; break; } }
+     if(!hit) return;
+     (scores[key]||[]).forEach(function(x){ if(x && x.d && x.d>m) m=x.d; });
+   });
+   return m;
+ }
+ function report(prefix, label, noun, scores, w){
+   var start=w.start, anchor=w.anchor, prevStart=w.prevStart, prevEnd=w.prevEnd;
    var rows=[], previous=[], ids={};
    Object.keys(scores||{}).forEach(function(key){
      if(key.indexOf(prefix)!==0) return;
@@ -4952,25 +5154,33 @@ _WEEKLY_PRACTICE_JS = r"""
        if(x.d>=prevStart && x.d<=prevEnd) previous.push({s:x.s,key:key});
      });
    });
-   if(!rows.length) return "<div class='card'><b>"+label+"</b><p class='hint'>No "+noun+" practice logged this week yet.</p></div>";
+   var range="<div class='hint' style='margin-top:8px'>"+pretty(start)+" – "+pretty(anchor)+"</div>";
+   if(!rows.length) return "<div class='card'><b>"+label+"</b><p class='hint'>No "+noun+
+     " practised between "+pretty(start)+" and "+pretty(anchor)+".</p></div>";
    var avg=mean(rows), old=mean(previous), delta=old==null?'—':(avg-old>0?'+':'')+(avg-old);
    var best=Math.max.apply(null,rows.map(function(x){return x.s;}));
    return "<div class='card'><b>"+label+"</b><div style='display:flex;gap:18px;flex-wrap:wrap;margin-top:10px'>"+
      "<span><b style='font-size:23px'>"+rows.length+"</b><span class='hint'> attempts</span></span>"+
      "<span><b style='font-size:23px'>"+avg+"</b><span class='hint'> average</span></span>"+
      "<span><b style='font-size:23px'>"+best+"</b><span class='hint'> best</span></span>"+
-     "<span><b style='font-size:23px'>"+Object.keys(ids).length+"</b><span class='hint'> "+noun+"</span></span>"+
-     "<span><b style='font-size:23px'>"+delta+"</b><span class='hint'> vs. previous week</span></span></div></div>";
+     "<span><b style='font-size:23px'>"+Object.keys(ids).length+"</b><span class='hint'> "+noun+" this week</span></span>"+
+     "<span><b style='font-size:23px'>"+delta+"</b><span class='hint'> vs. previous week</span></span></div>"+
+     range+"</div>";
  }
  window.addEventListener('load',function(){
    var el=document.getElementById('weekly-practice-report'); if(!el)return;
    var anchor=window.WEEKLY_ANCHOR; if(!anchor)return;
-   var d=new Date(anchor+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-6); var start=iso(d);
-   d.setUTCDate(d.getUTCDate()-7); var prevStart=iso(d);
-   var e=new Date(start+'T12:00:00Z'); e.setUTCDate(e.getUTCDate()-1); var prevEnd=iso(e);
    var scores=(window.SkillStore&&window.SkillStore.get('ec_scores',{}))||{};
-   el.innerHTML=report('dict:','Listening','clips',scores,start,anchor,prevStart,prevEnd)+
-                report('reading:','Reading','passages',scores,start,anchor,prevStart,prevEnd);
+   // WEEKLY_ANCHOR is the date of your last speaking RECORDING, which is the
+   // right frame for the speaking sections above — but dictation and reading
+   // are practised independently of recording yourself, so anchoring them
+   // there hid every clip done since the last recording. (Concretely: 40 clips
+   // practised, only 30 counted, because the newest session postdated the
+   // anchor.) Run these two off whichever is more recent instead.
+   var last=lastPractised(scores,['dict:','reading:']);
+   var w=windows(last>anchor?last:anchor);
+   el.innerHTML=report('dict:','Listening','clips',scores,w)+
+                report('reading:','Reading','passages',scores,w);
  });
 })();
 """

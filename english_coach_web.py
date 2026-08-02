@@ -154,19 +154,65 @@ def _is_score_history(d):
     return isinstance(d, dict) and all(isinstance(v, list) for v in d.values())
 
 
-def _dedup_entries(entries):
-    seen, out = set(), []
-    for e in entries:
-        k = json.dumps(e, sort_keys=True) if isinstance(e, (dict, list)) else e
-        if k not in seen:
-            seen.add(k)
+def _entry_key(e):
+    return json.dumps(e, sort_keys=True) if isinstance(e, (dict, list)) else e
+
+
+def _merge_entry_lists(old_list, new_list):
+    """Merge two snapshots of one word's attempt list without losing attempts.
+
+    The client always POSTs its whole list, so `new_list` normally repeats
+    everything already in `old_list` plus whatever it just logged. Naive
+    concatenation would double every shared entry; set-style dedup (what this
+    used to do) goes wrong in the other direction and is much worse: two
+    genuinely separate attempts at the same word, on the same day, that happen
+    to score the same number are byte-identical `{s, d}` dicts, so one of them
+    was silently thrown away. With integer scores and repeat drilling that
+    collides constantly — it had already eaten ~9% of the recorded attempts in
+    this library before this fix.
+
+    So: match on identity where we can, and on multiplicity where we can't.
+      * entries carrying an `i` (a client-minted unique id, see logScore) are
+        matched by that id — exact, order-independent, no false collisions;
+      * legacy entries without one are matched by count: if `old` holds two
+        copies of an identical entry and `new` holds three, the result holds
+        three. A resent snapshot adds nothing; a real third attempt is kept.
+
+    Everything in `old` survives — the only thing a POST can do to a word's
+    history here is grow it. Order is preserved (old first, genuinely-new
+    entries appended), which is also chronological, since attempts are only
+    ever appended.
+    """
+    if not isinstance(old_list, list):
+        return new_list
+    if not isinstance(new_list, list):
+        return old_list
+
+    old_ids = {e["i"] for e in old_list if isinstance(e, dict) and e.get("i")}
+    old_counts = {}
+    for e in old_list:
+        if not (isinstance(e, dict) and e.get("i")):
+            k = _entry_key(e)
+            old_counts[k] = old_counts.get(k, 0) + 1
+
+    out = list(old_list)
+    seen_counts = {}
+    for e in new_list:
+        if isinstance(e, dict) and e.get("i"):
+            if e["i"] not in old_ids:
+                old_ids.add(e["i"])
+                out.append(e)
+            continue
+        k = _entry_key(e)
+        seen_counts[k] = seen_counts.get(k, 0) + 1
+        if seen_counts[k] > old_counts.get(k, 0):
             out.append(e)
     return out
 
 
-def _merge_progress(old, new):
+def _merge_progress(old, new, replace_keys=()):
     """Per-key last-write-wins, with one exception: for a key shaped like
-    ec_scores (a dict of word -> list of score entries), union each word's
+    ec_scores (a dict of word -> list of score entries), merge each word's
     list instead of replacing the whole dict.
 
     Plain last-write-wins works fine for a single device, but two devices (or
@@ -174,15 +220,20 @@ def _merge_progress(old, new):
     snapshot — whichever POSTs second would otherwise silently discard scores
     the first one just logged. That's exactly what happened once already, so
     this key gets the safer treatment; everything else keeps simple replace.
+
+    Because merging can only ever grow a list, a client that genuinely wants to
+    drop history (the "Reset history" button) can't express that as a snapshot —
+    it has to name the key in `replace_keys`, which forces a plain overwrite.
     """
     merged = dict(old)
     for key, new_val in new.items():
         old_val = old.get(key)
-        if _is_score_history(new_val) and _is_score_history(old_val):
+        if key in replace_keys:
+            merged[key] = new_val
+        elif _is_score_history(new_val) and _is_score_history(old_val):
             combined = dict(old_val)
             for word, new_list in new_val.items():
-                old_list = combined.get(word, [])
-                combined[word] = _dedup_entries(old_list + new_list) if isinstance(old_list, list) else new_list
+                combined[word] = _merge_entry_lists(combined.get(word, []), new_list)
             merged[key] = combined
         else:
             merged[key] = new_val
@@ -201,8 +252,13 @@ def api_progress():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify(error="expected a JSON object"), 400
+    payload = dict(payload)
+    # opt-in overwrite, for the rare client action that means "delete", not
+    # "here's my latest snapshot" — see _merge_progress
+    replace = payload.pop("__replace", None)
+    replace = tuple(replace) if isinstance(replace, list) else ()
     with _progress_lock:
-        data = _merge_progress(load_progress(), payload)
+        data = _merge_progress(load_progress(), payload, replace)
         save_progress(data)
     return jsonify(ok=True)
 
@@ -713,7 +769,17 @@ _PRACTICE_JS = r"""
  function st(){ return window.SkillStore; }
  function custom(){ return st().get('pw_custom',[]); }
  function hidden(){ return st().get('pw_hidden',[]); }
- function words(){ var h=hidden(),seen={},out=[]; base().concat(custom()).forEach(function(w){ w=(''+w).trim(); var lw=w.toLowerCase(); if(w&&!seen[lw]&&h.indexOf(w)<0){seen[lw]=1;out.push(w);} }); return out; }
+ // Any word you have ever recorded an attempt for. base() is the CURRENT top-20
+ // mispronunciations, so it churns as you add recordings — without this, a word
+ // you had drilled for weeks silently vanished from the table (with its whole
+ // score history) the moment it dropped out of that top 20. The scores were
+ // never actually deleted; there was just nothing left rendering them.
+ function practised(){ var sc=st().get('ec_scores',{}),out=[];
+   Object.keys(sc).forEach(function(k){ if(k.indexOf('word:')===0 && (sc[k]||[]).length) out.push(k.slice(5)); });
+   return out; }
+ function words(){ var h=hidden().map(function(x){return (''+x).toLowerCase();}),seen={},out=[];
+   base().concat(custom()).concat(practised()).forEach(function(w){ w=(''+w).trim(); var lw=w.toLowerCase();
+     if(w&&!seen[lw]&&h.indexOf(lw)<0){seen[lw]=1;out.push(w);} }); return out; }
  function body(){ return document.getElementById('pw-body'); }
  function curve(a){ if(!a.length) return "<span class='hint'>—</span>";
    var pts=a.slice(-14),n=pts.length,W=140,H=30,p=3;
@@ -814,8 +880,17 @@ _PRACTICE_JS = r"""
        var fd=new FormData(); fd.append('word',word); fd.append('audio',blob,'w.webm');
        fetch('/practice',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
          if(j.error){ if(status)status.textContent=j.error; return; }
+         // belt and braces: Math.round(null) is 0, so an unscored attempt would
+         // otherwise be logged as a genuine zero
+         if(typeof j.score!=='number' || isNaN(j.score)){
+           if(status)status.textContent='That attempt could not be scored — nothing logged.'; return; }
          var sc=Math.max(0,Math.min(100,Math.round(j.score)));
-         window.SkillStore.logScore(key,sc); if(status)status.innerHTML='<b>'+word+'</b> → '+sc+'/100 logged'; render();
+         window.SkillStore.logScore(key,sc);
+         var msg='<b>'+word+'</b> → '+sc+'/100 logged';
+         // why the number is what it is, when Azure's own dictionary is at fault
+         if(j.note) msg+="<div class='hint' style='margin-top:4px'>"+st().esc(j.note)+"</div>";
+         if(status)status.innerHTML=msg;
+         render();
        }).catch(function(){ if(status)status.textContent='No server / offline.'; });
      };
      mr.start(200);
@@ -826,11 +901,18 @@ _PRACTICE_JS = r"""
      if(words().some(function(x){return x.toLowerCase()===lw;})){
        var s=document.getElementById('pw-status'); if(s) s.innerHTML="⚠️ <b>"+st().esc(v)+"</b> is already in your list.";
        var inp=document.getElementById('pw-new'); if(inp){inp.focus(); inp.select();} return; }
-     var h=hidden(); if(h.some(function(x){return x.toLowerCase()===lw;})) st().set('pw_hidden', h.filter(function(x){return x.toLowerCase()!==lw;}));
-     var c=custom(); c.push(v); st().set('pw_custom',c); render();
+     // update() (not set()) so a tab that has been open a while doesn't POST a
+     // stale list and wipe words added since it loaded
+     st().update('pw_hidden',[],function(h){ return h.filter(function(x){return (''+x).toLowerCase()!==lw;}); });
+     st().update('pw_custom',[],function(c){ c=c.slice(); c.push(v); return c; });
+     render();
      var s2=document.getElementById('pw-status'); if(s2) s2.textContent='Added “'+v+'”.';
      var ni=document.getElementById('pw-new'); if(ni)ni.focus(); },
-   del:function(word){ st().set('pw_custom', custom().filter(function(x){return x!==word;})); var h=hidden(); if(h.indexOf(word)<0){h.push(word); st().set('pw_hidden',h);} render(); },
+   del:function(word){ var lw=(''+word).toLowerCase();
+     st().update('pw_custom',[],function(c){ return c.filter(function(x){return (''+x).toLowerCase()!==lw;}); });
+     st().update('pw_hidden',[],function(h){
+       return h.some(function(x){return (''+x).toLowerCase()===lw;}) ? h : h.concat([word]); });
+     render(); },
    sort:function(k){ if(SORT.key===k){ SORT.dir=SORT.dir==='asc'?'desc':'asc'; } else { SORT.key=k; SORT.dir=(k==='word')?'asc':'desc'; } render(); },
    toggleMask:function(){ st().set('pw_hidemastered', !st().get('pw_hidemastered',false)); render(); },
    reset:function(){
@@ -839,7 +921,10 @@ _PRACTICE_JS = r"""
      if(!n){ var s=document.getElementById('pw-status'); if(s)s.textContent='No single-word history to reset.'; return; }
      if(!confirm('Reset ALL single-word score history?\n\nThis permanently clears every recorded attempt for all '+n+' words (story scores are kept). This cannot be undone.')) return;
      var kept={}; Object.keys(all).forEach(function(k){ if(k.indexOf('word:')!==0) kept[k]=all[k]; });
-     st().set('ec_scores',kept); render();
+     // replace, not merge — the server-side merge can only grow a score list,
+     // so a plain set() here left every "cleared" attempt sitting on disk and
+     // the table came straight back on the next reload
+     st().set('ec_scores',kept,true); render();
      var s2=document.getElementById('pw-status'); if(s2)s2.textContent='Single-word score history cleared.'; } };
  window.addEventListener('load', function(){
    IPA=Object.assign({}, st().get('pw_ipa',{}), window.PRACTICE_IPA||{});
@@ -1071,6 +1156,39 @@ def ipa_lookup():
     return jsonify(out)
 
 
+# Words whose Azure lexicon entry is wrong, mapped to a homophone Azure spells
+# correctly ({"tied": "tide"}). Discovered on first use and remembered, so the
+# extra verification call is paid once per word rather than on every attempt.
+_ALIAS_PATH = os.path.join(LIBRARY, "azure_aliases.json")
+_alias_lock = threading.Lock()
+
+
+def _alias_for(word):
+    try:
+        with open(_ALIAS_PATH, encoding="utf-8") as f:
+            return (json.load(f) or {}).get((word or "").lower(), "")
+    except Exception:
+        return ""
+
+
+def _remember_alias(word, alias):
+    try:
+        with _alias_lock:
+            try:
+                with open(_ALIAS_PATH, encoding="utf-8") as f:
+                    data = json.load(f) or {}
+            except Exception:
+                data = {}
+            data[(word or "").lower()] = alias
+            os.makedirs(os.path.dirname(_ALIAS_PATH), exist_ok=True)
+            tmp = _ALIAS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, _ALIAS_PATH)
+    except Exception:
+        pass
+
+
 @app.route("/practice", methods=["POST"])
 def practice():
     """Score a short re-recording of a single word against itself (Azure)."""
@@ -1097,16 +1215,65 @@ def practice():
         return jsonify(error="The recording was empty or too short — hold the button, "
                              "say the word clearly, then Stop.")
     try:
-        # Single-word drill: prosody/fluency are meaningless for one word and
-        # only drag the number down, so skip prosody and grade on Accuracy —
-        # the phoneme-level quality that actually reflects the pronunciation.
-        # Miscue OFF too, or homophones (tied/tide, dyed/died) get docked for a
-        # spelling mismatch the recogniser invents even when the sound is right.
-        az = ec.azure_pronunciation(tmp, word, enable_prosody=False,
-                                    enable_miscue=False, locale="en-US")
+        def assess(ref):
+            # Single-word drill: prosody/fluency are meaningless for one word and
+            # only drag the number down, so skip prosody and grade on Accuracy —
+            # the phoneme-level quality that actually reflects the pronunciation.
+            # Miscue OFF too, or homophones (tied/tide, dyed/died) get docked for a
+            # spelling mismatch the recogniser invents even when the sound is right.
+            return ec.azure_pronunciation(tmp, ref, enable_prosody=False,
+                                          enable_miscue=False, locale="en-US")
+
+        def expected(az):
+            ws = az.get("words") or []
+            return ws[0].get("phones") or [] if ws else []
+
+        def scored(az):
+            a = az.get("accuracy")
+            return a if a is not None else az.get("pron_score")
+
+        SUSPECT_BELOW = 85          # a good score is already right; leave it alone
+
+        alias, note = _alias_for(word), ""
+        az = assess(alias or word)
+        if alias:
+            note = ("Scored as “%s” — Azure's dictionary has the wrong vowel for "
+                    "the spelling “%s”. Same sound, honest score." % (alias, word))
+        elif (scored(az) is not None and scored(az) < SUSPECT_BELOW
+                and ec.azure_lexicon_disagrees(word, expected(az))):
+            # A low score AND a target that matches no reading of the word. Either
+            # Azure's dictionary is wrong or the attempt was, and re-scoring
+            # against a homophone Azure does know tells us which: if the same
+            # audio suddenly scores well, the dictionary was at fault.
+            #
+            # Gating on a low score matters. Where Azure holds several readings it
+            # returns whichever fits the audio, so an unconditional check would
+            # flag a perfectly good "live" /lɪv/ (CMUdict lists /laɪv/ first) and
+            # replace a 100 with a re-score against the wrong vowel.
+            alt = ec.cmu_homophone(word)
+            alt_az = assess(alt) if alt else None
+            if (alt_az and not ec.azure_lexicon_disagrees(word, expected(alt_az))
+                    and scored(alt_az) is not None and scored(alt_az) > scored(az)):
+                az, alias = alt_az, alt
+                _remember_alias(word, alt)
+                note = ("Scored as “%s” — Azure's dictionary has the wrong vowel for "
+                        "the spelling “%s”. Same sound, honest score." % (alt, word))
+            else:
+                note = ("⚠️ Azure graded this against /%s/, but “%s” is /%s/ — the "
+                        "score may say more about its dictionary than your "
+                        "pronunciation." % (" ".join(expected(az)), word,
+                                            " ".join(ec.cmu_arpabet(word))))
+        score = scored(az)
         acc = az.get("accuracy")
-        score = acc if acc is not None else az.get("pron_score")
+        if score is None:
+            # Azure recognised nothing it could grade (silence, wrong word, a
+            # clipped recording). Say so — returning a null score let the client
+            # round it to 0 and log that as a real attempt, which quietly poisons
+            # the word's history and its average.
+            return jsonify(error="Azure couldn't score that recording — it may be "
+                                 "silent, cut off, or a different word. Try again.")
         return jsonify(score=score, accuracy=acc, pron=az.get("pron_score"),
+                       note=note, alias=alias or "",
                        words=[{"w": w["word"], "a": w["accuracy"], "e": w["error"]}
                               for w in az.get("words", [])])
     except Exception as e:
