@@ -28,15 +28,15 @@ vocabulary capture call an API.
 
 ## What's inside
 
-The app is a single dashboard with **16 training panels** organised around
-what you're working on, plus a **Setting Panel** for API keys and login
-(covered under [API keys](#api-keys) and [Login](#login) below, not in this
-table — it's configuration, not training):
+The app is a single dashboard with **17 training panels** organised around
+what you're working on, plus a **Setting Panel** for API keys, prompts and
+login (covered under [API keys](#api-keys) and [Login](#login) below, not in
+this table — it's configuration, not training):
 
 ### Speaking
 | Panel | What it does |
 |---|---|
-| 📈 Summary & progress | improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
+| 📈 Summary & progress | average pronunciation score by week (speaking, reading passage, single word); improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
 | 🎯 Practice single word | say a word, get an instant Azure accuracy score — every attempt is logged so you can watch a specific word improve |
 | 📖 Reading | reread the polished version of one of your own past recordings, scored against it |
 | 📋 Speaking error log | grammar and word-choice mistakes aggregated across sessions |
@@ -47,7 +47,7 @@ table — it's configuration, not training):
 | Panel | What it does |
 |---|---|
 | 🎧 Listening — dictation | real recorded speech, you type what you heard; graded by word-level alignment |
-| 📋 Listening error log | the words you keep mishearing, ranked by frequency |
+| 📋 Listening error log | the words you keep mishearing, ranked by frequency, with a skip list so the table stays about real problems rather than function words |
 | 🎧 Listening vocabulary | your receptive vocabulary size, derived from dictation results |
 | 🔉 Listening (ear training) | minimal-pair ear training — can you tell /ɪ/ from /iː/? |
 
@@ -56,10 +56,15 @@ table — it's configuration, not training):
 |---|---|
 | 🎧 Sound system | the full English phoneme inventory with audio and examples |
 | 🗣️ 中→EN Pronunciation | Mandarin-L1 specific: the interference patterns you'll keep hitting |
-| 📇 Vocabulary & chunks | high-frequency words and fixed expressions to practise — capture your own by hand, or from a photo of your surroundings (see [Architecture](#architecture)) |
 | 🎭 Register | formal vs. informal, written vs. spoken — when to use which |
 | 📕 Vowels & consonants 101 | the basics of how English sounds are made |
 | 🧮 How scoring works | what each metric means and how the numbers are calculated |
+
+### Vocabulary & surroundings
+| Panel | What it does |
+|---|---|
+| 🧭 Surrounding vocabulary | every word your photos turn up plus anything you capture by hand, as flashcards — and a coverage report against what you can already say and understand (see [Vocabulary tracking](#vocabulary-tracking)) |
+| 🖼 Describe a photo | photograph what's around you, get a description and word list back, then later describe the same photo from memory and diff your attempt against the original |
 
 ## Quick start
 
@@ -108,6 +113,9 @@ Everything happens on one page. **➕ New Speaking Analysis** opens the capture 
 - **Pick a practice story** from `Practice scripts/` to load a known reference
   text, or let the app auto-fill a transcript it already has on disk for that
   file.
+- **Choose where it's saved** — a subfolder of the library, picked from the ones
+  already there or typed in — so a year of recordings doesn't land in one flat
+  list. The reports walk the whole tree, so filing things away never hides them.
 
 Results land in the dashboard alongside every previous session, the progress
 curve, and a drill list seeded from the words you actually got wrong.
@@ -127,6 +135,25 @@ results of the other. Photo → vocabulary capture is the exception that needs
 *something*: it always goes through a vision-capable model (Kimi if
 `KIMI_API_KEY` is set, else Anthropic/Claude), since DeepSeek's API is
 text-only.
+
+### Prompts
+
+The two prompts that shape what the LLMs return — the grammar analysis and the
+photo vocabulary capture — are editable in the Setting Panel rather than buried
+in the source. Each is validated on save against a placeholder it must keep
+(the analysis prompt needs `{transcript}`; the photo prompt has to keep asking
+for `items`), so a well-meaning edit can't quietly break the parser. Leave a
+box empty to fall back to the built-in default.
+
+### Storage
+
+Recordings accumulate — a year of them is mostly media, not results. The
+Setting Panel has a storage card that deletes the audio and video while keeping
+every generated result, so old sessions stay in the reports, the vocabulary
+counts and the progress curve with only the playback gone. Anything that hasn't
+been analyzed yet is never touched, since deleting it would lose the only copy.
+Duration and recording time are stamped into each `.result.json` while the media
+is still present, which is what makes the file self-sufficient afterward.
 
 ### Login
 
@@ -161,8 +188,14 @@ audio ─┬─> faster-whisper ──────> transcript ─┬─> LLM �
        │
        └─> NumPy FFT pitch tracker ────────> pitch variation, range, rate, pause ratio, nPVI rhythm
 
-photo ──────> vision LLM (Kimi, falling back to Claude) ──> candidate vocabulary
-                                                             (headword, definition, example, scenario)
+photo ──────> vision LLM (Kimi, falling back to Claude) ─┬─> candidate vocabulary
+                                                         │   (headword, definition, example, scenario)
+                                                         │
+                                                         ├─> a description to shadow, and to
+                                                         │   recite from memory later
+                                                         │
+                                                         └─> word ledger (append-only: delete the
+                                                             photo, keep what you met)
                                                           │
                                                           v
                         one self-contained HTML dashboard, behind a login gate
@@ -184,8 +217,9 @@ photo ──────> vision LLM (Kimi, falling back to Claude) ──> cand
 - **`english_coach_web.py`** — Flask app. Upload, transcribe, score, serve the
   dashboard; long jobs run on background threads and stream progress to the
   browser by polling. Also owns the login/session layer (every route is gated
-  except `/login`) and `/api/progress`, the server-side store that replaced
-  browser-only localStorage.
+  except `/login`), `/api/progress` — the server-side store that replaced
+  browser-only localStorage — the saved-photo routes, the editable-prompt
+  registry, and media pruning.
 - **`transcribe_service.py`** — a standalone, reusable sherpa-onnx STT
   microservice (HTTP + WebSocket, self-describing `/api` spec). Mounted into the
   web app so live captions work in a single process, but runnable on its own.
@@ -232,8 +266,9 @@ mishearing.
 
 ## Vocabulary tracking
 
-The app tracks vocabulary on both sides — what you produce when speaking, and
-what you perceive when listening — and can compare the two.
+The app tracks vocabulary on three sides — what you produce when speaking, what
+you perceive when listening, and what is physically around you — and compares
+them against each other.
 
 ### Speaking vocabulary
 
@@ -258,6 +293,35 @@ by ear, as opposed to how much you can produce.
 Both panels include a toggle that overlays the two vocabularies — words you can
 say but not reliably hear, words you can recognise but don't produce yourself,
 and the overlap where both match.
+
+### Surrounding vocabulary
+
+The third side is the room you're actually in. Photograph your desk, your
+kitchen, the street, and a vision model returns the words for what's in the
+frame; you can also type words in by hand. The interesting question is then not
+how many words you've collected but **which of the things around you every day
+you still can't name** — so the coverage report takes the distinct words your
+surroundings have produced and checks each one against your speaking transcripts
+and your dictation results, listing the ones that appear in neither, ranked by
+how many separate places they've turned up.
+
+Two decisions make that number mean something:
+
+**Phrases count as their parts.** A headword like *brick wall* or *shrug off
+criticism* is folded in as `brick` + `wall`, `shrug` + `criticism`. Matching
+whole phrases against a word list would never hit, and most of a chunk-heavy
+deck — collocations, idioms, phrasal verbs — would be invisible to the report
+while sitting right there in the vocabulary panel.
+
+**The record only ever grows.** Photos are a working set you prune to reclaim
+disk space; an append-only ledger keyed by word (`ec_seen`) is the permanent
+record of what you've met, storing which photos and captures each word came
+from and when you first met it. Deleting a photo, freeing just its image, or
+deleting a word from the deck all leave coverage byte-identical — the thumbnail
+degrades to a placeholder and the word stays. Frequency therefore means "times
+I've met this", not "photos still on disk", so a word can read ×3 from photos
+that no longer exist. The ledger folds in anything it doesn't recognise on
+first view, which makes the same routine both the migration and a self-repair.
 
 ## Design notes
 
@@ -364,10 +428,18 @@ repository via `.gitignore`.
 
 ## Status
 
-A working personal tool, used daily, not a packaged product. There are no tests
-(validation is a manual compile / HTML-parse / JS-parse pass), the UI is one
+A working personal tool, used daily, not a packaged product. The UI is one
 generated HTML file by design, and `english_coach_gui.py` is an earlier Tkinter
 version kept for reference.
+
+Test coverage is partial and deliberate: the two places where a silent wrong
+answer is worse than a crash are pinned down hard, and the rest is validated by
+a compile / HTML-parse / JS-parse pass plus driving the running app.
+
+```bash
+python test_dictation.py     # 38 checks — word-level alignment and grading
+python test_json_repair.py   # 22 checks — the LLM JSON repair chain
+```
 
 ## License
 
