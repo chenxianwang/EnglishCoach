@@ -58,3 +58,8 @@ venv/
 .idea/
 .vscode/
 *.swp
+
+# Claude Code local state: agent worktrees (a second copy of the repo) and
+# settings.local.json, whose command allowlist can contain literal passwords
+# from local test runs. Never publish.
+.claude/

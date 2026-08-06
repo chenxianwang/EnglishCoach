@@ -15,6 +15,7 @@ run it. Results drop straight into the dashboard with all your recordings and
 the progress summary.
 """
 
+import html
 import json
 import os
 import re
@@ -44,8 +45,45 @@ CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".english_coach.json")
 AUDIO_EXTS = (".m4a", ".mp3", ".wav", ".mp4", ".mov", ".aac", ".flac", ".ogg")
 
 
-def rec_dir(stem, create=True):
-    return ec.rec_dir_for(stem, library=LIBRARY, create=create)
+def safe_folder(raw):
+    """Sanitise a user-typed save folder into a relative path under LIBRARY.
+
+    Anything that could escape the library is dropped rather than rejected, so
+    a stray slash or a pasted absolute path degrades to a sensible folder name
+    instead of an error: "..", "." and empty segments go, drive letters and
+    leading slashes go with them. Returns "" for "save at the top level".
+    """
+    parts = []
+    for seg in (raw or "").replace("\\", "/").split("/"):
+        seg = seg.strip().strip(".").strip()
+        if not seg or seg in (".", "..") or ":" in seg:
+            continue
+        parts.append(os.path.basename(seg))
+    return os.path.join(*parts) if parts else ""
+
+
+def rec_dir(stem, create=True, folder=""):
+    """Where one recording's files live: LIBRARY/<folder>/<stem>/."""
+    lib = os.path.join(LIBRARY, safe_folder(folder)) if folder else LIBRARY
+    return ec.rec_dir_for(stem, library=lib, create=create)
+
+
+def existing_folders():
+    """Save folders already in use — the ones holding recording folders.
+
+    Offered as autocomplete so the same month or topic doesn't end up spelled
+    three different ways.
+    """
+    found = set()
+    for dirpath, _dirs, files in os.walk(LIBRARY):
+        is_recording = (any(f.endswith(".result.json") for f in files)
+                        or any(f.lower().endswith(ec._AV) for f in files))
+        if not is_recording:
+            continue
+        rel = os.path.relpath(os.path.dirname(dirpath), LIBRARY)
+        if rel not in (".", os.pardir) and not rel.startswith(os.pardir):
+            found.add(rel)
+    return sorted(found)
 
 
 word_ipa = ec.word_ipa   # single CMUdict-backed IPA lookup, shared with the engine
@@ -106,6 +144,48 @@ def save_config(cfg):
             json.dump(cfg, f)
     except Exception:
         pass
+
+
+# The prompts the Setting Panel exposes for editing. `needs` is a substring the
+# saved text must keep — the placeholder or field name the rest of the pipeline
+# depends on, so a well-meaning edit can't silently break analysis.
+EDITABLE_PROMPTS = {
+    "analysis": {
+        "cfg": "analysis_prompt",
+        "attr": "ANALYSIS_PROMPT_OVERRIDE",
+        "default": "ANALYSIS_PROMPT",
+        "needs": "{transcript}",
+        "why": "that placeholder is where your recording's text gets inserted, so "
+               "without it the model would be asked to analyze nothing",
+        "title": "Grammar analysis prompt",
+        "blurb": "Sent to DeepSeek/Anthropic for every recording you analyze, "
+                 "alongside the transcript. It must keep asking for the same JSON "
+                 "shape, or the report can't be rendered.",
+    },
+    "vocab_photo": {
+        "cfg": "vocab_photo_prompt",
+        "attr": "VOCAB_PHOTO_PROMPT_OVERRIDE",
+        "default": "VOCAB_PHOTO_PROMPT",
+        "needs": '"items"',
+        "why": "the Vocabulary panel reads the word list out of that JSON field",
+        "title": "Photo vocabulary prompt",
+        "blurb": "Sent to Kimi/Anthropic with the picture behind Vocabulary &amp; "
+                 "chunks &rarr; From photo &rarr; Find vocabulary in this photo. "
+                 "Keep the <code>scenario</code> and <code>description</code> "
+                 "fields too, or the topic tag and the photo description go blank.",
+    },
+}
+
+
+def _apply_prompts(cfg=None):
+    """Push the Setting Panel's prompts into the engine. Analysis runs in a
+    background thread of this same process, so a module attribute is enough."""
+    cfg = load_config() if cfg is None else cfg
+    for spec in EDITABLE_PROMPTS.values():
+        setattr(ec, spec["attr"], (cfg.get(spec["cfg"]) or "").strip())
+
+
+_apply_prompts()
 
 
 # Practice scores, vocabulary, grammar log, listening SRS, ear-training and
@@ -389,6 +469,107 @@ def _persist_keys_from_form(form):
     return keys
 
 
+def _protected_media():
+    """Media with no result.json beside it — never analyzed, never prunable."""
+    files, size = 0, 0
+    for dirpath, _dirs, names in os.walk(LIBRARY):
+        if any(f.endswith(".result.json") for f in names):
+            continue
+        for fn in names:
+            if fn.lower().endswith(ec._AV):
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, fn))
+                    files += 1
+                except OSError:
+                    pass
+    return files, size
+
+
+def _storage_card():
+    """Reclaim the space recordings take, without losing any report."""
+    rows, total = ec.prunable_media()
+    pfiles, psize = _protected_media()
+    folders = len({r[3] for r in rows})
+    oldest = ""
+    if rows:
+        import datetime
+        oldest = datetime.datetime.fromtimestamp(rows[0][2]).strftime("%b %-d, %Y")
+
+    if not rows:
+        body = ("<p class='hint' style='margin:0'>Nothing to reclaim — every "
+                "analyzed recording has already had its audio removed.</p>")
+    else:
+        opts = "".join(
+            "<option value='%d'%s>%s</option>"
+            % (d, " selected" if d == 0 else "", label)
+            for d, label in ((0, "all analyzed recordings"),
+                             (30, "older than 30 days"),
+                             (60, "older than 60 days"),
+                             (90, "older than 90 days")))
+        body = ("<p style='margin:0 0 10px'><b>%s</b> in <b>%d</b> audio file(s) "
+                "across %d analyzed recording(s), oldest from %s.</p>"
+                "<form method='post' action='/prune_media' style='margin:0' "
+                "onsubmit=\"return confirm('Delete the audio for these recordings? "
+                "Scores and transcripts are kept, but playback is gone for good.')\">"
+                "<label class='hint'>Delete audio for "
+                "<select name='older_than'>%s</select></label>"
+                "<div style='margin-top:12px'>"
+                "<button type='submit' class='btn'>&#128451; Free up space</button>"
+                "</div></form>"
+                % (ec._fmt_bytes(total), len(rows), folders, ec._esc(oldest), opts))
+
+    protected = ""
+    if pfiles:
+        protected = ("<p class='hint' style='margin:12px 0 0;border-top:1px solid "
+                     "var(--line);padding-top:10px'>🔒 <b>%s</b> in %d file(s) is "
+                     "left alone: audio with no analysis beside it has never been "
+                     "scored, so deleting it would lose the only copy. Analyze a "
+                     "recording first and it becomes reclaimable.</p>"
+                     % (ec._fmt_bytes(psize), pfiles))
+
+    return ("""
+      <div class='card'>
+        <h2 style='margin-top:0'>Recording storage</h2>
+        <p class='hint' style='margin:0 0 12px'>Deletes only the audio/video.
+          Each recording keeps its <code>result.json</code>, transcript and
+          polished text, so every score, the word-level detail and all the
+          vocabulary panels stay exactly as they are — you just lose playback
+          for those recordings. This cannot be undone.</p>
+        %s%s
+      </div>
+    """ % (body, protected))
+
+
+def _prompt_form(name, cfg):
+    """One editable-prompt card: the live text, plus Save and Restore default."""
+    spec = EDITABLE_PROMPTS[name]
+    custom = (cfg.get(spec["cfg"]) or "").strip()
+    state = ("<b style='color:var(--accent)'>Customised.</b> Restore the default "
+             "to go back to the built-in one."
+             if custom else "Currently the built-in default.")
+    return ("""
+      <form method='post' action='/prompt'>
+        <input type='hidden' name='which' value='%s'>
+        <div class='card'>
+          <h2 style='margin-top:0'>%s</h2>
+          <p class='hint' style='margin:0 0 10px'>%s %s</p>
+          <textarea name='text' rows='22' spellcheck='false'
+            style='width:100%%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                   font-size:12.5px;line-height:1.5;background:#0d1b22;color:#dbe6ea;
+                   border:1px solid var(--line);border-radius:8px;padding:10px'>%s</textarea>
+        </div>
+        <button type='submit' style='font-size:16px;padding:10px 20px;border-radius:10px;
+           border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
+           💾 Save prompt</button>
+        <button type='submit' name='reset' value='1' class='btn small'
+           style='margin-left:10px'
+           onclick="return confirm('Discard your edits and restore the built-in prompt?')"
+           >&#8635; Restore default</button>
+      </form>
+    """ % (name, spec["title"], spec["blurb"], state,
+           html.escape(custom or getattr(ec, spec["default"]))))
+
+
 def _settings_panel(msg="", active=""):
     """The Setting Panel — API keys and related config, split out of the
     analysis form so a key can be saved without uploading a recording."""
@@ -399,8 +580,11 @@ def _settings_panel(msg="", active=""):
     dkey = os.environ.get("DEEPSEEK_API_KEY") or cfg.get("deepseek_key", "")
     kkey = os.environ.get("KIMI_API_KEY") or cfg.get("kimi_key", "")
     ph = lambda k: "•••••• (saved — leave blank to keep)" if k else ""
-    note = (("<p id='flash-msg' class='summary' style='border-left:4px solid var(--good)'>%s</p>" % msg)
+    note = (("<p id='flash-msg' class='summary' style='border-left:4px solid var(--%s)'>%s</p>"
+             % ("good" if msg.startswith("✓") else "bad", msg))
             if msg and active == "settings" else "")
+    prompt_forms = "".join(_prompt_form(name, cfg) for name in EDITABLE_PROMPTS)
+    storage = _storage_card()
     return ("""
     <section id='settings' class='tabpanel hidden'>
       <h1>Setting Panel</h1>
@@ -428,6 +612,7 @@ def _settings_panel(msg="", active=""):
            border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
            💾 Save settings</button>
       </form>
+      %s
       <form method='post' action='/change_password'>
         <div class='card'>
           <h2 style='margin-top:0'>Login password</h2>
@@ -441,9 +626,10 @@ def _settings_panel(msg="", active=""):
            border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
            🔒 Update password</button>
       </form>
+      %s
       <p class='hint' style='margin-top:16px'><a href='/logout' style='color:var(--accent)'>Log out</a></p>
     </section>
-    """ % (note, ph(akey), aregion, ph(dkey), ph(ankey), ph(kkey)))
+    """ % (note, ph(akey), aregion, ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage))
 
 
 def _load_items_and_history():
@@ -459,11 +645,13 @@ def _load_items_and_history():
                     except Exception:
                         continue
                     # attach this recording's audio path (served by /VideoAudioFiles/…)
+                    item["has_audio"] = False
                     for af in sorted(os.listdir(root)):
                         if af.lower().endswith(av):
                             item["audio_rel"] = os.path.relpath(
                                 os.path.join(root, af), HERE)
                             item["audio_abs"] = os.path.join(root, af)
+                            item["has_audio"] = True
                             try:
                                 # fallback ordering signal for recordings whose
                                 # filename carries no timestamp
@@ -471,6 +659,9 @@ def _load_items_and_history():
                             except OSError:
                                 pass
                             break
+                    # stamp recorded_at/duration while the media is still here,
+                    # so pruning it later can't scramble the ordering
+                    ec._stamp_recording_meta(item, os.path.join(root, fn))
                     ec._backfill_prosody(item, os.path.join(root, fn))
                     items.append(item)
         hp = os.path.join(LIBRARY, "history.json")
@@ -491,6 +682,10 @@ def _form_panel(msg="", active=""):
     _svc = os.environ.get("TRANSCRIBE_SERVICE_URL", "")
     _ws_url = ((_svc.replace("https://", "wss://").replace("http://", "ws://")
                 .rstrip("/") + "/v1/stream") if _svc else "")
+    # prefill with whatever was used last, so a month folder is typed once
+    last_folder = safe_folder(load_config().get("last_save_folder", ""))
+    folder_opts = "".join("<option value='%s'></option>" % ec._esc(f)
+                          for f in existing_folders())
     return ("""
     <section id='newrec' class='tabpanel hidden'>
       <h1>New Speaking Analysis</h1>
@@ -505,6 +700,22 @@ def _form_panel(msg="", active=""):
                style='padding:6px 12px;border-radius:8px;border:0;background:#2c4a58;
                color:#fff;cursor:pointer'>● Record in browser</button>
             <span id='mic-status' class='hint' style='margin-left:8px'></span>
+          </div>
+          <div style='margin-top:10px;border-top:1px solid var(--line);padding-top:10px'>
+            <label>Save to folder
+              <input type='text' name='save_folder' id='save-folder' list='folder-list'
+                 value="%s" placeholder='e.g. 2026-08 or Interviews'
+                 style='min-width:240px' onchange='lookupFiles()'></label>
+            <datalist id='folder-list'>%s</datalist>
+            <button type='button' class='btn small' style='margin-left:8px'
+               onclick="var f=document.getElementById('save-folder');
+                        f.value=new Date().toISOString().slice(0,7); lookupFiles();"
+               >📅 This month</button>
+            <p class='hint' style='margin:6px 0 0'>Created inside
+              <code>VideoAudioFiles/</code> if it doesn't exist. Leave blank to save at
+              the top level. Nesting works — <code>2026/August</code> is fine. Reports
+              read every folder, so grouping never hides a recording, and the folder
+              you use here is remembered for next time.</p>
           </div>
           <div id='lookup-status' class='hint' style='margin-top:6px'></div>
         </div>
@@ -563,11 +774,18 @@ def _form_panel(msg="", active=""):
       <script>
         // when a file is picked, ask the server if we already have its
         // transcript / analysis JSON and auto-fill them.
+        // the save folder is part of a recording's identity — /lookup and
+        // /transcribe must look in the same place /analyze will write to
+        function saveFolder(){
+          var f=document.getElementById('save-folder');
+          return f ? f.value : '';
+        }
         function lookupFiles(){
           var inp=document.getElementById('audio-input');
           var st=document.getElementById('lookup-status');
           if(!inp.files || !inp.files[0]){ st.textContent=''; return; }
-          fetch('/lookup?name='+encodeURIComponent(inp.files[0].name))
+          fetch('/lookup?name='+encodeURIComponent(inp.files[0].name)
+                +'&folder='+encodeURIComponent(saveFolder()))
             .then(function(r){return r.json();})
             .then(function(j){
               if(j.transcript){
@@ -586,6 +804,7 @@ def _form_panel(msg="", active=""):
           var fd=new FormData(); fd.append('audio', inp.files[0]);
           fd.append('model', document.getElementById('tx-model').value);
           fd.append('lang', document.getElementById('tx-lang').value);
+          fd.append('save_folder', saveFolder());
           btn.disabled=true;
           st.innerHTML='<span style=\"color:#43c59e\">●</span> Uploading…';
           fetch('/transcribe',{method:'POST',body:fd})
@@ -750,7 +969,7 @@ def _form_panel(msg="", active=""):
             o.value=i; o.textContent=s.name; sel.appendChild(o); }); });
       </script>
     </section>
-    """ % (note,)) + (
+    """ % (note, ec._esc(last_folder), folder_opts)) + (
         "<script>window.LIVE_WS=%r;"
         # flash banner: strip msg from the URL (so a refresh won't repeat it)
         # and auto-dismiss after a few seconds
@@ -1320,8 +1539,8 @@ def vocab_photo():
     if anthropic_key:
         os.environ["ANTHROPIC_API_KEY"] = anthropic_key
     try:
-        items = ec.vision_vocab_from_image(data, mime_type=f.mimetype or "image/jpeg")
-        return jsonify(items=items)
+        out = ec.vision_vocab_from_image(data, mime_type=f.mimetype or "image/jpeg")
+        return jsonify(items=out["items"], description=out["description"])
     except Exception as e:
         return jsonify(error=str(e)[:300])
 
@@ -1337,7 +1556,7 @@ def lookup():
     stem = _stem_of(request.args.get("name", ""))
     if not stem:
         return jsonify(transcript="")
-    d = rec_dir(stem, create=False)
+    d = rec_dir(stem, create=False, folder=request.args.get("folder", ""))
     txt = os.path.join(d, stem + ".txt")
     transcript = ""
     if os.path.exists(txt):
@@ -1388,7 +1607,7 @@ def transcribe():
         return jsonify(error="no audio file")
     name = safe_name(f.filename)
     stem = os.path.splitext(name)[0]
-    d = rec_dir(stem)
+    d = rec_dir(stem, folder=request.form.get("save_folder", ""))
     audio_path = os.path.join(d, name)
     try:
         f.save(audio_path)
@@ -1596,6 +1815,124 @@ def settings():
     return redirect("/?p=settings&msg=" + quote("✓ Settings saved."))
 
 
+# Photos kept for the Describe-a-photo review loop. Under LIBRARY so the
+# existing /VideoAudioFiles/<path> route serves them and the backup rule
+# (only .txt/.json from the library) keeps them out of the zip. The prune tool
+# and load_transcripts both ignore this folder: a .jpg is not in ec._AV, and
+# there is no <name>.txt beside it.
+PHOTOS_DIR = os.path.join(LIBRARY, "PhotoDescriptions")
+PHOTOS_URL = "/VideoAudioFiles/PhotoDescriptions/"
+
+
+@app.route("/photo_save", methods=["POST"])
+def photo_save():
+    """Persist an analyzed photo so it can be reviewed later.
+
+    Only the image lands on disk; the description and word list travel back to
+    the client and live in progress.json, which keeps that file small enough to
+    stay a synchronous page-load fetch.
+    """
+    from flask import jsonify
+    f = request.files.get("image")
+    if not f:
+        return jsonify(error="No image received.")
+    data = f.read()
+    if not data:
+        return jsonify(error="The image was empty.")
+    if len(data) > 6 * 1024 * 1024:
+        return jsonify(error="Image is too large (max 6MB).")
+    pid = "p" + uuid.uuid4().hex[:12]
+    try:
+        os.makedirs(PHOTOS_DIR, exist_ok=True)
+        with open(os.path.join(PHOTOS_DIR, pid + ".jpg"), "wb") as out:
+            out.write(data)
+    except OSError as e:
+        return jsonify(error="Could not save the image: %s" % e)
+    return jsonify(id=pid, url=PHOTOS_URL + pid + ".jpg")
+
+
+@app.route("/photo_delete", methods=["POST"])
+def photo_delete():
+    """Drop a saved photo's image file. The entry itself is removed client-side."""
+    from flask import jsonify
+    pid = os.path.basename((request.form.get("id") or "").strip())
+    if not pid or not re.fullmatch(r"p[0-9a-f]{12}", pid):
+        return jsonify(error="bad id")
+    try:
+        os.remove(os.path.join(PHOTOS_DIR, pid + ".jpg"))
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        return jsonify(error=str(e))
+    return jsonify(ok=True)
+
+
+@app.route("/photo_compare", methods=["POST"])
+def photo_compare():
+    """Grade a from-memory description against the one the vision model wrote.
+
+    Same word-level aligner the dictation panel uses — recalling a description
+    and transcribing a clip are the same comparison, so they get the same
+    scoring and the same diff rendering.
+    """
+    from flask import jsonify
+    ref = (request.form.get("ref") or "").strip()
+    said = (request.form.get("said") or "").strip()
+    if not ref:
+        return jsonify(error="This photo has no saved description to compare against.")
+    if not said:
+        return jsonify(error="Say or type your description first.")
+    res = ec.dictation_check(ref, said)
+    res["text"] = ref
+    return jsonify(res)
+
+
+@app.route("/prune_media", methods=["POST"])
+def prune_media():
+    """Delete recording audio whose analysis is already saved beside it."""
+    try:
+        days = int(request.form.get("older_than", "0"))
+    except ValueError:
+        days = 0
+    deleted, freed, errors = ec.prune_media(LIBRARY, older_than_days=max(0, days))
+    if not deleted and not errors:
+        return redirect("/?p=settings&msg=" + quote(
+            "Nothing matched — no analyzed recording is that old."))
+    msg = "✓ Freed %s from %d recording file(s). Scores and transcripts kept." % (
+        ec._fmt_bytes(freed), deleted)
+    if errors:
+        msg = "Freed %s from %d file(s), but %d could not be deleted: %s" % (
+            ec._fmt_bytes(freed), deleted, len(errors), "; ".join(errors[:3]))
+    return redirect("/?p=settings&msg=" + quote(msg))
+
+
+@app.route("/prompt", methods=["POST"])
+def prompt():
+    """Save (or restore) one of the prompts exposed on the Setting Panel."""
+    def back(msg):
+        return redirect("/?p=settings&msg=" + quote(msg))
+
+    spec = EDITABLE_PROMPTS.get(request.form.get("which", ""))
+    if not spec:
+        return back("Unknown prompt — nothing was saved.")
+    cfg = load_config()
+    if request.form.get("reset"):
+        cfg.pop(spec["cfg"], None)
+        save_config(cfg)
+        _apply_prompts(cfg)
+        return back("✓ Restored the built-in %s." % spec["title"].lower())
+    text = (request.form.get("text") or "").strip()
+    if not text:
+        return back("The %s can't be empty. Nothing was saved — use Restore "
+                    "default if you want the built-in one back." % spec["title"].lower())
+    if spec["needs"] not in text:
+        return back("The %s must contain %s — %s. Nothing was saved."
+                    % (spec["title"].lower(), spec["needs"], spec["why"]))
+    save_config({**cfg, spec["cfg"]: text})
+    _apply_prompts()
+    return back("✓ %s saved." % spec["title"])
+
+
 @app.route("/analyze", methods=["POST"])
 def analyze():
     try:
@@ -1604,7 +1941,10 @@ def analyze():
             return redirect("/?p=newrec&msg=Please+choose+an+audio+file.")
         name = safe_name(f.filename)
         stem = os.path.splitext(name)[0]
-        d = rec_dir(stem)
+        folder = safe_folder(request.form.get("save_folder", ""))
+        d = rec_dir(stem, folder=folder)
+        # remember it so the next recording defaults to the same folder
+        save_config({**load_config(), "last_save_folder": folder})
         audio_path = os.path.join(d, name)
         try:
             f.save(audio_path)

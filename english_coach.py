@@ -279,6 +279,16 @@ Transcript:
 """
 
 
+# A prompt edited in the Setting Panel, pushed in here by the web app at startup
+# and on every save. Empty means "use the built-in ANALYSIS_PROMPT above".
+ANALYSIS_PROMPT_OVERRIDE = ""
+
+
+def analysis_prompt():
+    """The prompt actually sent for grammar analysis."""
+    return (ANALYSIS_PROMPT_OVERRIDE or "").strip() or ANALYSIS_PROMPT
+
+
 # Default models for grammar analysis. Override with ANTHROPIC_MODEL /
 # DEEPSEEK_MODEL env vars if your account uses different ones.
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
@@ -665,7 +675,7 @@ def _anthropic_analyze(transcript, model=None):
             max_tokens=2000,
             messages=[{
                 "role": "user",
-                "content": ANALYSIS_PROMPT.replace("{transcript}", transcript),
+                "content": analysis_prompt().replace("{transcript}", transcript),
             }],
         )
     except Exception as e:
@@ -730,7 +740,7 @@ def _deepseek_chat(messages, model, max_tokens=8000):
 def _deepseek_analyze(transcript, model=None):
     model = model or os.environ.get("DEEPSEEK_MODEL") or DEFAULT_DEEPSEEK_MODEL
     text = _deepseek_chat(
-        [{"role": "user", "content": ANALYSIS_PROMPT.replace("{transcript}", transcript)}],
+        [{"role": "user", "content": analysis_prompt().replace("{transcript}", transcript)}],
         model)
     try:
         return _extract_json(text, "DeepSeek")
@@ -782,10 +792,16 @@ and skip anything that doesn't relate to what is actually visible.
 Also pick the ONE scenario/topic that best describes the whole photo, from
 this exact list: %s.
 
+Describe the photo in 3-5 sentences in English: what is in it, what is
+happening, and any detail worth noticing. Write natural prose the learner can
+read aloud for shadowing practice, and use some of the words you picked out
+above so the description and the word list reinforce each other.
+
 Return ONLY a JSON object with this exact shape:
 
 {
   "scenario": "one value from the list above, verbatim",
+  "description": "the 3-5 sentence description, as one plain string",
   "items": [
     {"headword": "the word or phrase",
      "definition": "a short, plain English gloss or explanation",
@@ -800,6 +816,15 @@ CRITICAL OUTPUT RULES — the response must be strictly valid JSON:
 - No trailing commas, no comments, no markdown fences.
 - Return ONLY the JSON object, nothing before or after it.
 """ % ", ".join('"%s"' % s for s in VOCAB_SCENARIOS)
+
+
+# Same Setting Panel override mechanism as ANALYSIS_PROMPT above.
+VOCAB_PHOTO_PROMPT_OVERRIDE = ""
+
+
+def vocab_photo_prompt():
+    """The prompt actually sent with an uploaded photo."""
+    return (VOCAB_PHOTO_PROMPT_OVERRIDE or "").strip() or VOCAB_PHOTO_PROMPT
 
 
 # kimi-k3 is Moonshot's current flagship with vision built in natively (no
@@ -823,21 +848,25 @@ def _vision_provider():
 def vision_vocab_from_image(image_bytes, mime_type="image/jpeg"):
     """Turn a photo into a short vocabulary list via a vision-capable LLM.
 
-    Stamps every item with the photo's one detected scenario (falling back to
-    "General" if the model drifted off the fixed list), so the Vocabulary
-    panel's scenario filter has a consistent bucket to file it under.
+    Returns {"items": [...], "description": "..."}. Every item is stamped with
+    the photo's one detected scenario (falling back to "General" if the model
+    drifted off the fixed list), so the Vocabulary panel's scenario filter has
+    a consistent bucket to file it under.
     """
     provider = _vision_provider()
     data = (_kimi_vision_vocab(image_bytes, mime_type) if provider == "kimi"
             else _anthropic_vision_vocab(image_bytes, mime_type))
     if not isinstance(data, dict):
-        return []
+        return {"items": [], "description": ""}
     scenario = data.get("scenario") if data.get("scenario") in VOCAB_SCENARIOS else "General"
     items = data.get("items") or []
     for it in items:
         if isinstance(it, dict):
             it["scenario"] = scenario
-    return items
+    # an edited prompt may drop the description, so never assume it's there
+    desc = data.get("description")
+    return {"items": items,
+            "description": desc.strip() if isinstance(desc, str) else ""}
 
 
 def _anthropic_vision_vocab(image_bytes, mime_type):
@@ -866,7 +895,7 @@ def _anthropic_vision_vocab(image_bytes, mime_type):
                 "content": [
                     {"type": "image", "source": {
                         "type": "base64", "media_type": mime_type, "data": b64}},
-                    {"type": "text", "text": VOCAB_PHOTO_PROMPT},
+                    {"type": "text", "text": vocab_photo_prompt()},
                 ],
             }],
         )
@@ -940,7 +969,7 @@ def _kimi_vision_vocab(image_bytes, mime_type):
         "role": "user",
         "content": [
             {"type": "image_url", "image_url": {"url": data_url}},
-            {"type": "text", "text": VOCAB_PHOTO_PROMPT},
+            {"type": "text", "text": vocab_photo_prompt()},
         ],
     }]
     text = _kimi_chat(messages, model)
@@ -1570,11 +1599,15 @@ def _report_body(d):
         err_color = {k: bg for k, _, bg, _ in AZURE_ERROR_CATS}
         err_color["Low"] = "#e07b39"
         pills = []
+        # Without the audio there is nothing to seek into, so don't dress the
+        # words up as clickable — a pill that highlights on hover and then does
+        # nothing reads as a bug.
+        playable = bool(d.get("audio_rel"))
         for x in az.get("words", []):
             e = x.get("error", "")
             t = x.get("t")
             ta = (" data-t='%s'" % t) if t is not None else ""
-            sk = " seek" if t is not None else ""
+            sk = " seek" if (t is not None and playable) else ""
             if e:
                 c = err_color.get(e, "#ff6b6b")
                 pills.append(
@@ -1586,10 +1619,15 @@ def _report_body(d):
                              % (sk, ta, _esc(x["word"])))
         errs = "".join(pills)
         audio_el = ""
-        if d.get("audio_rel"):
+        if playable:
             audio_el = ("<audio class='rec-audio' src='%s' preload='none'></audio>"
                         "<p class='hint'>🔊 Click any word below to hear that moment "
                         "in your recording.</p>" % _media_src(d["audio_rel"]))
+        else:
+            audio_el = ("<p class='hint'>🗄 The audio for this recording has been "
+                        "removed to free up space. Every score, the transcript and "
+                        "the word-level detail below are kept — only playback is "
+                        "gone.</p>")
         ec_counts = az.get("error_counts", {})
         total_words = max(1, len(az.get("words", [])))
         # word-level mistakes (first three) vs prosody/delivery (last three)
@@ -2588,11 +2626,14 @@ window.SkillStore=(function(){
  // (pw_custom, pw_hidden, …). CACHE is hydrated once at page load, so a tab
  // left open while you add words on another device would otherwise POST its
  // stale list and drop them. Re-read the server first, mutate that, write back.
- function update(k,d,fn){
+ // `replace` is for lists whose entries get EDITED or REMOVED, not just
+ // appended (ec_photos): the server's append-merge would otherwise keep the
+ // old copy of an edited entry alongside the new one, and resurrect deletions.
+ function update(k,d,fn,replace){
    var fresh=_xhrRetry('GET','/api/progress');
    if(fresh){ CACHE=fresh; }
    var cur=get(k,d);
-   set(k, fn(cur));
+   set(k, fn(cur), replace);
  }
  function today(){return new Date().toISOString().slice(0,10);}
  function addDays(n){var x=new Date();x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
@@ -2663,57 +2704,185 @@ _GRADE_HTML = ("<div class='ssgrades'>Recall: "
 
 _VOCAB_JS = (r"""
 (function(){var S=window.SkillStore; var MODE='review'; var SCFILTER='all';
- var PHOTO={blob:null, previewUrl:null, items:null, busy:false, err:''};
  function scenarios(){ return window.VOCAB_SCENARIOS||['General']; }
  function items(){return S.get('lex_items',[]);} function save(a){S.set('lex_items',a);}
  function body(){return document.getElementById('vx-body');}
  function due(){var t=S.today(); return items().filter(function(x){return !x.srs||x.srs.due<=t;});}
- function render(){ MODE==='add'?addForm():MODE==='all'?all():MODE==='photo'?photoCapture():review(); }
- // shrink a photo to a small JPEG client-side before it ever leaves the
- // browser — keeps uploads fast and under the vision API's size limit
- // without pulling in an image library on the Python side.
- function downscaleImage(file,maxDim,cb){
-   var img=new Image(), url=URL.createObjectURL(file);
-   img.onload=function(){
-     URL.revokeObjectURL(url);
-     var w=img.width,h=img.height,scale=Math.min(1,maxDim/Math.max(w,h));
-     var cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
-     var cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
-     cv.getContext('2d').drawImage(img,0,0,cw,ch);
-     cv.toBlob(function(blob){cb(blob);},'image/jpeg',0.85);
-   };
-   img.onerror=function(){ URL.revokeObjectURL(url); cb(null); };
-   img.src=url;
+ function render(){ MODE==='add'?addForm():MODE==='all'?all():MODE==='cover'?coverage():review(); }
+
+ // ---- coverage: what my surroundings contain vs what I actually use --------
+ // Tokenised, because a headword can be a phrase: "hit a forehand" is worth
+ // knowing as hit + forehand, and matching it whole against a spoken-word list
+ // would never hit. Function words are dropped — "a" proves nothing.
+ function tokens(text){
+   var out=[];
+   (text||'').toLowerCase().replace(/[^a-z' ]+/g,' ').split(/\s+/).forEach(function(w){
+     w=w.replace(/^'+|'+$/g,''); if(w.length>1||w==='a'||w==='i') out.push(w); });
+   return out;
  }
- function photoCapture(){
-   var preview=PHOTO.previewUrl?("<img src='"+PHOTO.previewUrl+"' style='max-width:240px;border-radius:8px;display:block;margin:10px 0'>"):"";
-   var analyzeBtn=PHOTO.blob?("<button class='btn' onclick='VX.analyzePhoto()' "+(PHOTO.busy?'disabled':'')+">"+(PHOTO.busy?'Analyzing…':'🔎 Find vocabulary in this photo')+"</button>"):"";
-   var err=PHOTO.err?("<p class='hint' style='color:var(--bad)'>"+S.esc(PHOTO.err)+"</p>"):"";
-   var results='';
-   if(PHOTO.items && PHOTO.items.length){
-     results="<div style='margin-top:14px;border-top:1px solid var(--line);padding-top:10px'>"+
-       "<div style='display:flex;justify-content:space-between;align-items:center'><b>"+PHOTO.items.length+
-       " found <span class='hint' style='font-weight:400'>· "+S.esc(PHOTO.items[0].scenario||'General')+"</span></b>"+
-       "<button class='btn small' onclick='VX.addAllPhoto()'>➕ Add all</button></div>"+
-       PHOTO.items.map(function(it,i){
-         return "<div class='card' style='margin-top:8px'><div style='display:flex;justify-content:space-between;gap:8px;align-items:flex-start'>"+
-           "<div><b>"+S.esc(it.headword)+"</b> <span class='hint'>"+S.esc(it.type||'')+"</span>"+
-           "<p style='margin:4px 0'>"+S.esc(it.definition||'')+"</p>"+
-           "<p class='hint'>"+S.esc(it.example||'')+"</p></div>"+
-           "<span style='white-space:nowrap'>"+
-           "<button class='btn small' onclick='VX.addPhotoItem("+i+")'>➕ Add</button> "+
-           "<button class='btn small' onclick='VX.dropPhotoItem("+i+")'>✕</button></span></div></div>";
-       }).join('')+"</div>";
-   } else if(PHOTO.items){
-     results="<p class='hint' style='margin-top:10px'>No vocabulary found in that photo.</p>";
+ function stopwords(){
+   var fw={}; (window.VOCAB_FUNCTION_WORDS||[]).forEach(function(w){ fw[w]=1; }); return fw;
+ }
+ // Coverage reads the permanent ledger (ec_seen), not the live photo list, so
+ // deleting a photo to reclaim space never rewrites the history of what has
+ // been around you. Photos are a working set; the ledger is the record.
+ function seenLedger(){ return S.get('ec_seen',{}); }
+ // A word enters your surroundings two ways: a photo turns it up, or you capture
+ // it by hand. Both belong in the ledger, and both go in TOKENISED — a
+ // collocation like "brick wall" is brick and wall. Storing only whole headwords
+ // would hide every word that only ever arrives inside a phrase, which is most
+ // of them once your deck fills up with chunks.
+ function foldSource(seen, kind, id, headwords, date){
+   var key = (kind==='photo') ? 'pids' : 'cids', changed=false;
+   headwords.forEach(function(hw){
+     tokens(hw).forEach(function(w){
+       var e=seen[w] || (seen[w]={pids:[], cids:[], forms:{}, first:date||'', last:date||''});
+       if(!e[key]) e[key]=[];
+       if(e[key].indexOf(id)<0){ e[key].push(id); changed=true; }
+       if(!e.forms[hw]){ e.forms[hw]=1; changed=true; }
+       if(date && (!e.first || date<e.first)){ e.first=date; changed=true; }
+       if(date && (!e.last  || date>e.last )){ e.last=date;  changed=true; }
+     });
+   });
+   return changed;
+ }
+ // Written the moment a word is captured, so deleting it from the deck later
+ // can't erase the fact that you met it.
+ function recordCaptured(list){
+   var rows=(list||[]).filter(function(x){ return x && x.id && tokens(x.headword).length; });
+   if(!rows.length) return;
+   S.update('ec_seen',{},function(seen){
+     seen=seen||{};
+     rows.forEach(function(x){ foldSource(seen,'capture',x.id,[x.headword],x.added||S.today()); });
+     return seen; }, true);
+ }
+ // Self-healing migration: fold in any photo or captured word the ledger doesn't
+ // know about yet. Idempotent on source id, so it also repairs a ledger that fell
+ // behind for any other reason. Only writes when something was actually missing.
+ function syncLedger(){
+   var cur=seenLedger(), gotP={}, gotC={}, missP=[], missC=[];
+   Object.keys(cur).forEach(function(w){
+     (cur[w].pids||[]).forEach(function(p){ gotP[p]=1; });
+     (cur[w].cids||[]).forEach(function(c){ gotC[c]=1; });
+   });
+   // a source with nothing tokenisable in it is skipped rather than retried
+   // forever — it would never leave a trace to recognise it by
+   photos().forEach(function(p){
+     if(gotP[p.id]) return;
+     if((p.items||[]).some(function(it){ return tokens(it.headword).length; })) missP.push(p);
+   });
+   items().forEach(function(x){
+     if(!x.id || gotC[x.id]) return;
+     if(tokens(x.headword).length) missC.push(x);
+   });
+   if(!missP.length && !missC.length) return false;
+   S.update('ec_seen',{},function(seen){
+     seen=seen||{};
+     missP.forEach(function(p){
+       foldSource(seen,'photo',p.id,(p.items||[]).map(function(it){return it.headword;}),p.d||'');
+     });
+     missC.forEach(function(x){ foldSource(seen,'capture',x.id,[x.headword],x.added||''); });
+     return seen; }, true);
+   return true;
+ }
+ // document frequency: how many separate places a word turned up in — each photo
+ // it appeared in, plus each entry you captured by hand. Appearing in five photos
+ // is what "keeps being around me" actually means; five mentions inside one photo
+ // is just one scene.
+ function surroundingFreq(){
+   var fw=stopwords(), led=seenLedger(), live={}, freq={};
+   photos().forEach(function(p){ live[p.id]=p; });
+   Object.keys(led).forEach(function(w){
+     if(fw[w]) return;
+     var e=led[w], pids=e.pids||[], cids=e.cids||[];
+     if(!pids.length && !cids.length) return;
+     freq[w]={ n:pids.length+cids.length, cap:cids.length, words:e.forms||{},
+               first:e.first||'', last:e.last||'',
+               photos:pids.map(function(pid){
+                 var p=live[pid];
+                 return p && !p.imgGone
+                   ? {img:p.img, pid:pid, d:p.d, scenario:p.scenario, live:true}
+                   : {pid:pid, live:false}; }) };
+   });
+   return freq;
+ }
+ function spokenSet(){
+   var s={}; (window.SPOKEN_WORDS||[]).forEach(function(w){ s[w]=1; }); return s;
+ }
+ // same derivation the Listening vocabulary panel uses: only clips you have
+ // actually practised count as heard.
+ function heardSet(){
+   var clips=window.LISTEN_TEXTS||{}, srs=S.get('dict_srs',{}), sc=S.get('ec_scores',{}), ids={}, out={};
+   Object.keys(srs).forEach(function(k){ ids[k]=1; });
+   Object.keys(sc).forEach(function(k){ if(k.indexOf('dict:')===0) ids[k.slice(5)]=1; });
+   Object.keys(ids).forEach(function(id){
+     if(clips[id]===undefined) return;
+     tokens(clips[id]).forEach(function(w){ out[w]=1; }); });
+   return out;
+ }
+ function coverage(){
+   syncLedger();
+   var freq=surroundingFreq(), all=Object.keys(freq);
+   if(!all.length){
+     body().innerHTML="<div class='card'>Nothing here yet. Save a photo in <b>Describe a photo</b>, "+
+       "or capture a word by hand, and this report shows which of the words around you you can "+
+       "already say, which you've only ever heard, and which you've never met anywhere else.</div>";
+     return;
    }
-   body().innerHTML="<div class='card'>"+
-     "<p class='sub' style='margin-top:0'>Take or choose a photo of what's around you. Claude looks at it and "+
-     "suggests words and phrases you'd actually use to describe it — review each one before it's added.</p>"+
-     "<input type='file' id='vx-photo-input' accept='image/*' capture='environment' style='display:none' onchange='VX.onPhotoChosen(this)'>"+
-     "<button class='btn' onclick=\"document.getElementById('vx-photo-input').click()\">📷 Take / choose photo</button> "+
-     analyzeBtn+preview+err+"</div>"+results;
- }
+   var spoken=spokenSet(), heard=heardSet();
+   var nSp=0, nHe=0, nBoth=0, gap=[];
+   all.forEach(function(w){
+     var s=!!spoken[w], h=!!heard[w];
+     if(s) nSp++; if(h) nHe++; if(s&&h) nBoth++;
+     if(!s&&!h) gap.push(w);
+   });
+   var pct=function(n){ return all.length?Math.round(100*n/all.length):0; };
+   var stats="<div class='metrics'>"+
+     "<div class='m'><span>"+all.length+"</span>distinct words around you</div>"+
+     "<div class='m'><span style='color:var(--good)'>"+nSp+"</span>you've also spoken <div class='hint'>"+pct(nSp)+"%</div></div>"+
+     "<div class='m'><span style='color:var(--accent)'>"+nHe+"</span>you've also heard <div class='hint'>"+pct(nHe)+"%</div></div>"+
+     "<div class='m'><span style='color:var(--warn)'>"+gap.length+"</span>neither <div class='hint'>"+pct(gap.length)+"%</div></div></div>";
+
+   gap.sort(function(a,b){ return freq[b].n-freq[a].n || (a<b?-1:1); });
+   var recurring=gap.filter(function(w){ return freq[w].n>1; });
+   var lead="<p class='sub'>Your surroundings against what you actually produce and take in. "+
+     "Every word your photos turn up and every word you've captured counts, phrases included — "+
+     "<i>brick wall</i> is counted as <i>brick</i> and <i>wall</i>, because those are the words "+
+     "you'd have to reach for. <b>Spoken</b> comes from your recording transcripts, <b>heard</b> "+
+     "from the dictation clips you've worked through — the same sources those two panels use. "+
+     "This report is append-only: deleting a photo or a word frees the space but never removes "+
+     "a word you've met.</p>";
+   var gapNote="<h2>Never spoken, never heard <span class='hint' style='font-weight:400'>"+gap.length+"</span></h2>"+
+     "<p class='sub'>Sorted by how many separate places each one turned up in — every photo it "+
+     "appeared in, plus a hand capture, counts once. The ones at the top are all around you and "+
+     "still absent from your English"+
+     (recurring.length?(" — "+recurring.length+(recurring.length===1?" of them has":" of them have")+
+       " turned up more than once"):"")+".</p>";
+   var rows=gap.map(function(w){
+     var e=freq[w];
+     var thumbs=e.photos.slice(0,4).map(function(p){
+       // the photo may be gone (deleted, or its image freed) — the word stays
+       return p.live
+         ? "<img src='"+S.esc(p.img)+"' title='"+S.esc((p.scenario||'')+' · '+(p.d||''))+
+           "' style='width:38px;height:28px;object-fit:cover;border-radius:4px;cursor:pointer;margin-right:3px' "+
+           "onclick=\"VX.openPhoto('"+p.pid+"')\">"
+         : "<span title='Photo no longer stored — the word is kept' style='display:inline-block;"+
+           "width:38px;height:28px;border-radius:4px;background:#1f3542;color:var(--mut);"+
+           "font-size:14px;text-align:center;line-height:28px;margin-right:3px'>🗄</span>"; }).join('');
+     // a word can reach you without a photo — through something you wrote down
+     if(e.cap) thumbs+="<span title='Captured by hand"+(e.cap>1?" ("+e.cap+" entries)":"")+
+       "' style='display:inline-block;width:38px;height:28px;border-radius:4px;"+
+       "background:#1f3542;color:var(--mut);font-size:14px;text-align:center;line-height:28px'>✍️</span>";
+     var forms=Object.keys(e.words).filter(function(x){return x.toLowerCase()!==w;});
+     var when=e.first? ("<div class='hint'>first met "+S.esc(e.first)+"</div>") : "";
+     return "<tr><td><b>"+S.esc(w)+"</b>"+(e.n>1?" <span class='chip up'>×"+e.n+"</span>":"")+when+"</td>"+
+       "<td class='hint'>"+S.esc(forms.join(', '))+"</td><td>"+thumbs+"</td></tr>";
+   }).join('');
+   var table=gap.length
+     ? "<table><tr><th>Word</th><th>Seen in</th><th>Where from</th></tr>"+rows+"</table>"
+     : "<div class='card'>🎉 Every word your surroundings have produced has also shown up in your "+
+       "speaking or your listening. Take a photo somewhere less familiar.</div>";
+   body().innerHTML=lead+stats+gapNote+table; }
  function review(){ if(!items().length){body().innerHTML="<div class='card'>No words yet. Hit Capture to add your first.</div>";return;}
    var d=due(); if(!d.length){body().innerHTML="<div class='card'>🎉 All caught up — nothing due to review.</div>";return;}
    var it=d[0];
@@ -2737,62 +2906,109 @@ _VOCAB_JS = (r"""
    "<button class='btn' style='margin-top:12px' onclick='VX.add()'>Save</button> <span id='vx-msg' class='hint'></span>"+
    "<div style='margin-top:14px;border-top:1px solid var(--line);padding-top:12px'>"+
    "<button class='btn small' onclick='VX.loadPack()'>📦 Load Chinglish starter pack</button> <span id='vx-pack' class='hint'></span></div></div>"; }
- function all(){ var full=items(); if(!full.length){body().innerHTML="<div class='card'>No words yet.</div>";return;}
-   var counts={all:full.length}; full.forEach(function(x){var sc=x.scenario||'General'; counts[sc]=(counts[sc]||0)+1;});
-   var present=['all'].concat(scenarios().filter(function(s){return counts[s];}));
-   if(SCFILTER!=='all' && present.indexOf(SCFILTER)<0) SCFILTER='all';
-   var fbar=present.length>2 ? "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px'>"+
-     present.map(function(s){ var label=s==='all'?'All':s;
-       return "<button class='btn small vxsc"+(SCFILTER===s?' active':'')+"' data-sc=\""+S.esc(s)+"\" onclick='VX.filterScenario(this)'>"+
-         S.esc(label)+" <span class='hint'>"+counts[s]+"</span></button>"; }).join('')+"</div>" : "";
-   var a=SCFILTER==='all'?full:full.filter(function(x){return (x.scenario||'General')===SCFILTER;});
-   if(!a.length){ body().innerHTML=fbar+"<div class='card'>No words in this scenario.</div>"; return; }
+ // Everything you've captured by hand, plus every word your photos produced.
+ // Photo words that you've already added to the deck appear once, as captured —
+ // the deck copy wins, because that's the one with the review schedule on it.
+ function photos(){ return S.get('ec_photos',[]); }
+ function merged(){
+   var out=items().map(function(x){
+     return {id:x.id, headword:x.headword, definition:x.definition, example:x.example||'',
+             type:x.type||'other', scenario:x.scenario||'General', src:'deck', srs:x.srs};
+   });
+   var have={}; out.forEach(function(x){ have[(x.headword||'').toLowerCase()]=1; });
+   photos().forEach(function(p){
+     (p.items||[]).forEach(function(it){
+       var k=(it.headword||'').toLowerCase();
+       if(!k || have[k]) return;
+       have[k]=1;
+       out.push({id:null, headword:it.headword, definition:it.definition||'',
+                 example:it.example||'', type:it.type||'single_word',
+                 scenario:it.scenario||p.scenario||'General', src:'photo',
+                 img:p.img, pid:p.id, d:p.d});
+     });
+   });
+   return out;
+ }
+ function chips(list, cur, fn){
+   return "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px'>"+
+     list.map(function(o){
+       return "<button class='btn small"+(cur===o.k?' active':'')+"' onclick=\"VX."+fn+
+         "('"+String(o.k).replace(/'/g,"\\'")+"')\">"+S.esc(o.label)+
+         " <span class='hint'>"+o.n+"</span></button>"; }).join('')+"</div>";
+ }
+ function all(){
+   var full=merged();
+   if(!full.length){ body().innerHTML="<div class='card'>No words yet. Hit <b>Capture</b> to add "+
+     "one by hand, or save a photo in <b>Describe a photo</b> and its words land here.</div>"; return; }
+   // No source breakdown up here: where a word came from is already on its own
+   // row, in the From column, where it's actually useful.
+   var scount={}; full.forEach(function(x){ scount[x.scenario]=(scount[x.scenario]||0)+1; });
+   if(SCFILTER!=='all' && !scount[SCFILTER]) SCFILTER='all';
+
+   var present=Object.keys(scount).sort();
+   var scBar=present.length>1 ? chips([{k:'all',label:'All scenarios',n:full.length}].concat(
+       present.map(function(s){return {k:s,label:s,n:scount[s]};})), SCFILTER,'filterScenario') : "";
+
+   var a=SCFILTER==='all'?full:full.filter(function(x){return x.scenario===SCFILTER;});
+   if(!a.length){ body().innerHTML=scBar+"<div class='card'>Nothing matches that filter.</div>"; return; }
+   a.sort(function(x,y){ return x.headword.toLowerCase()<y.headword.toLowerCase()?-1:1; });
    var by={}; a.forEach(function(x){(by[x.type||'other']=by[x.type||'other']||[]).push(x);});
-   var h=''; Object.keys(by).forEach(function(t){ h+="<h2>"+S.esc(t)+"</h2><table><tr><th>Word</th><th>Meaning</th><th>Example</th><th></th></tr>"+
-     by[t].map(function(x){return "<tr><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+"</td><td class='hint'>"+S.esc(x.example||'')+"</td><td><button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button></td></tr>";}).join('')+"</table>";});
-   body().innerHTML=fbar+h; }
+   var h='';
+   Object.keys(by).sort().forEach(function(t){
+     h+="<h2>"+S.esc(t)+" <span class='hint' style='font-weight:400'>"+by[t].length+"</span></h2>"+
+       "<table><tr><th>Word</th><th>Meaning</th><th>Example</th><th>From</th><th></th></tr>"+
+       by[t].map(function(x){
+         var from = x.src==='photo'
+           ? "<img src='"+S.esc(x.img)+"' title='"+S.esc(x.scenario+' · '+(x.d||''))+
+             "' style='width:54px;height:38px;object-fit:cover;border-radius:5px;cursor:pointer' "+
+             "onclick=\"VX.openPhoto('"+x.pid+"')\">"
+           : "<span class='hint'>"+(x.srs?'reviewing':'captured')+"</span>";
+         var act = x.src==='photo'
+           ? "<button class='btn small' title='Add to your review deck' onclick=\"VX.toDeck('"+
+             encodeURIComponent(x.headword)+"')\">➕</button>"
+           : "<button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button>";
+         return "<tr><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
+           "</td><td class='hint'>"+S.esc(x.example||'')+"</td><td>"+from+
+           "</td><td style='text-align:right'>"+act+"</td></tr>"; }).join('')+"</table>";
+   });
+   body().innerHTML=scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
  window.VX={ flip:function(){var b=body().querySelector('.vxback'); if(b)b.style.display='block';},
    add:function(){var h=document.getElementById('vx-h').value.trim(); if(!h){document.getElementById('vx-msg').textContent='Headword required';return;}
-     var a=items(); a.push({id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,srs:null}); save(a);
+     var it={id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,added:S.today(),srs:null};
+     var a=items(); a.push(it); save(a); recordCaptured([it]);
      document.getElementById('vx-msg').textContent='Saved ✓'; ['vx-h','vx-d','vx-e'].forEach(function(i){document.getElementById(i).value='';}); },
    del:function(id){ save(items().filter(function(x){return x.id!==id;})); all(); },
-   filterScenario:function(btn){ SCFILTER=btn.getAttribute('data-sc'); all(); },
-   loadPack:function(){ var seed=window.CHINGLISH_SEED||[]; var a=items(); var have={}; a.forEach(function(x){have[x.headword]=1;});
-     var n=0; seed.forEach(function(s){ if(!have[s.headword]){ a.push({id:S.uid(),headword:s.headword,definition:s.definition,example:s.example||'',type:s.type||'collocation',register:'neutral',scenario:'General',srs:null}); n++; } });
-     save(a); var m=document.getElementById('vx-pack'); if(m)m.textContent='Added '+n+' chunk(s). See the All tab.'; },
-   onPhotoChosen:function(input){
-     var file=input.files && input.files[0]; if(!file) return;
-     PHOTO.err=''; PHOTO.items=null;
-     downscaleImage(file,1024,function(blob){
-       if(!blob){ PHOTO.err='Could not read that image.'; render(); return; }
-       PHOTO.blob=blob;
-       if(PHOTO.previewUrl) URL.revokeObjectURL(PHOTO.previewUrl);
-       PHOTO.previewUrl=URL.createObjectURL(blob);
-       render();
+   filterScenario:function(s){ SCFILTER=s; all(); },
+   openPhoto:function(pid){
+     var a=document.querySelector("a[data-panel=photodesc]"); if(a) a.click();
+     if(window.PD) window.PD.open(pid);
+     window.scrollTo(0,0);
+   },
+   // promote a photo word into the spaced-repetition deck; until then it is
+   // only a thing you've seen, not a thing you're being asked to recall
+   toDeck:function(hw){
+     hw=decodeURIComponent(hw);
+     var row=merged().filter(function(x){return x.headword===hw && x.src==='photo';})[0];
+     if(!row) return;
+     var made=null;
+     S.update('lex_items',[],function(cur){
+       cur=cur||[];
+       if(cur.some(function(x){return (x.headword||'').toLowerCase()===hw.toLowerCase();})) return cur;
+       made={id:S.uid(),headword:row.headword,definition:row.definition,
+         example:row.example,type:row.type,register:'neutral',scenario:row.scenario,
+         added:S.today(),srs:null};
+       return cur.concat([made]);
      });
+     if(made) recordCaptured([made]);
+     all();
+     var m=document.getElementById('vx-allmsg');
+     if(m) m.textContent='Added “'+hw+'” to your review deck.';
    },
-   analyzePhoto:function(){
-     if(!PHOTO.blob || PHOTO.busy) return;
-     PHOTO.busy=true; PHOTO.err=''; render();
-     var fd=new FormData(); fd.append('image',PHOTO.blob,'photo.jpg');
-     fetch('/vocab_photo',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
-       PHOTO.busy=false;
-       if(j.error){ PHOTO.err=j.error; render(); return; }
-       PHOTO.items=(j.items||[]).map(function(it){return {headword:it.headword||'',definition:it.definition||'',example:it.example||'',type:it.type||'collocation',scenario:it.scenario||'General'};});
-       render();
-     }).catch(function(){ PHOTO.busy=false; PHOTO.err='Could not reach the server.'; render(); });
-   },
-   addPhotoItem:function(i){
-     var it=PHOTO.items && PHOTO.items[i]; if(!it) return;
-     var a=items(); a.push({id:S.uid(),headword:it.headword,definition:it.definition,example:it.example,type:it.type,register:'neutral',scenario:it.scenario||'General',srs:null}); save(a);
-     PHOTO.items.splice(i,1); render();
-   },
-   dropPhotoItem:function(i){ if(!PHOTO.items) return; PHOTO.items.splice(i,1); render(); },
-   addAllPhoto:function(){
-     if(!PHOTO.items) return; var a=items();
-     PHOTO.items.forEach(function(it){ a.push({id:S.uid(),headword:it.headword,definition:it.definition,example:it.example,type:it.type,register:'neutral',scenario:it.scenario||'General',srs:null}); });
-     save(a); PHOTO.items=[]; render();
-   } };
+   loadPack:function(){ var seed=window.CHINGLISH_SEED||[]; var a=items(); var have={}; a.forEach(function(x){have[x.headword]=1;});
+     var made=[]; seed.forEach(function(s){ if(!have[s.headword]){ var it={id:S.uid(),headword:s.headword,definition:s.definition,example:s.example||'',type:s.type||'collocation',register:'neutral',scenario:'General',added:S.today(),srs:null}; a.push(it); made.push(it); } });
+     save(a); recordCaptured(made);
+     var m=document.getElementById('vx-pack'); if(m)m.textContent='Added '+made.length+' chunk(s). See the All tab.'; }
+ };
  window.vxMode=function(btn){MODE=btn.getAttribute('data-m'); document.querySelectorAll('#vocab .drillnav .btn').forEach(function(b){b.classList.remove('active');}); btn.classList.add('active'); render();};
  if(document.getElementById('vx-body')) render();
 })();
@@ -3028,18 +3244,375 @@ _CHINGLISH_SEED = [
 
 def _vocab_panel():
     return ("<section id='vocab' class='tabpanel hidden'>"
-            "<h1>Vocabulary &amp; chunks</h1>"
-            "<p class='sub'>Capture words, idioms, phrasal verbs and collocations as you meet "
-            "them; review them as flashcards with spaced repetition.</p>"
+            "<h1>Surrounding vocabulary</h1>"
+            "<p class='sub'>The English for what's actually around you: every word your photos "
+            "turn up, plus anything you capture by hand. Review it as flashcards, and check it "
+            "against what you can already say and understand.</p>"
             "<div class='drillnav'>"
             "<button class='btn small active' data-m='review' onclick='vxMode(this)'>🃏 Review</button>"
             "<button class='btn small' data-m='add' onclick='vxMode(this)'>➕ Capture</button>"
-            "<button class='btn small' data-m='photo' onclick='vxMode(this)'>📷 From photo</button>"
             "<button class='btn small' data-m='all' onclick='vxMode(this)'>📚 All</button>"
+            "<button class='btn small' data-m='cover' onclick='vxMode(this)'>📊 Coverage</button>"
             "</div><div id='vx-body'></div></section>"
             "<script>window.CHINGLISH_SEED=%s;window.VOCAB_SCENARIOS=%s;%s</script>"
             % (json.dumps(_CHINGLISH_SEED, ensure_ascii=False).replace("</", "<\\/"),
                json.dumps(VOCAB_SCENARIOS, ensure_ascii=False), _VOCAB_JS))
+
+
+_PHOTO_DESC_JS = r"""
+(function(){var S=window.SkillStore; var MODE='capture'; var OPEN=null;
+ var P={blob:null, url:null, desc:'', items:null, busy:false, err:'', saved:''};
+ var R={said:'', res:null, busy:false, err:'', revealed:false};
+ function photos(){ return S.get('ec_photos',[]); }
+ // ec_photos entries get EDITED (a new recall attempt) and DELETED, which the
+ // server's append-merge can't express — so every write replaces the key.
+ function writePhotos(fn){ S.update('ec_photos',[],fn,true); }
+
+ // ---- the word ledger -----------------------------------------------------
+ // ec_photos is a working set: you delete photos to reclaim space. ec_seen is
+ // the permanent record of what has actually been around you, so the Coverage
+ // report only ever grows. Keyed by word; `pids` is the set of photos it was
+ // met in, which is both its frequency and its link back to the thumbnails.
+ // (Words captured by hand land in the same ledger under `cids`, written by the
+ // Surrounding vocabulary panel.)
+ function tokenise(text){
+   var out=[];
+   (text||'').toLowerCase().replace(/[^a-z' ]+/g,' ').split(/\s+/).forEach(function(w){
+     w=w.replace(/^'+|'+$/g,''); if(w.length>1||w==='a'||w==='i') out.push(w); });
+   return out;
+ }
+ // Fold one photo into the ledger. Idempotent on the photo id, so re-running it
+ // over photos already recorded changes nothing — that's what makes it safe to
+ // call as a migration for photos saved before the ledger existed.
+ function foldPhoto(seen, p){
+   var changed=false;
+   (p.items||[]).forEach(function(it){
+     tokenise(it.headword).forEach(function(w){
+       var e=seen[w] || (seen[w]={pids:[], cids:[], forms:{}, first:p.d||'', last:p.d||''});
+       if(!e.pids) e.pids=[];
+       if(e.pids.indexOf(p.id)<0){ e.pids.push(p.id); changed=true; }
+       if(!e.forms[it.headword]){ e.forms[it.headword]=1; changed=true; }
+       if(p.d && (!e.first || p.d<e.first)){ e.first=p.d; changed=true; }
+       if(p.d && (!e.last  || p.d>e.last )){ e.last=p.d;  changed=true; }
+     });
+   });
+   return changed;
+ }
+ function recordSeen(entry){
+   S.update('ec_seen',{},function(cur){
+     cur=cur||{}; foldPhoto(cur, entry); return cur; }, true);
+ }
+ function body(){ return document.getElementById('pd-body'); }
+ function render(){ MODE==='review'?review():MODE==='all'?all():capture(); }
+ function fmtDate(d){ return d||''; }
+
+ function downscale(file,maxDim,cb){
+   var img=new Image(), url=URL.createObjectURL(file);
+   img.onload=function(){
+     URL.revokeObjectURL(url);
+     var w=img.width,h=img.height,scale=Math.min(1,maxDim/Math.max(w,h));
+     var cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
+     var cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+     cv.getContext('2d').drawImage(img,0,0,cw,ch);
+     cv.toBlob(function(b){cb(b);},'image/jpeg',0.85);
+   };
+   img.onerror=function(){ URL.revokeObjectURL(url); cb(null); };
+   img.src=url;
+ }
+
+ function wordTable(list){
+   if(!list||!list.length) return '';
+   return "<table style='margin-top:10px'><tr><th>Word</th><th>Meaning</th><th>Example</th></tr>"+
+     list.map(function(it){
+       return "<tr><td><b>"+S.esc(it.headword)+"</b><div class='hint'>"+S.esc(it.type||'')+"</div></td>"+
+              "<td>"+S.esc(it.definition||'')+"</td><td class='hint'>"+S.esc(it.example||'')+"</td></tr>";
+     }).join('')+"</table>";
+ }
+
+ // ---- capture -------------------------------------------------------------
+ function capture(){
+   var prev=P.url?("<img src='"+P.url+"' style='max-width:320px;border-radius:10px;display:block;margin:10px 0'>"):"";
+   var go=P.blob?("<button class='btn' onclick='PD.analyze()' "+(P.busy?'disabled':'')+">"+
+     (P.busy?'Looking…':'🔎 Describe this photo')+"</button>"):"";
+   var err=P.err?("<p class='hint' style='color:var(--bad)'>"+S.esc(P.err)+"</p>"):"";
+   var out='';
+   if(P.desc||(P.items&&P.items.length)){
+     out="<div class='card' style='border-left:3px solid var(--accent)'>"+
+       "<b>What's in this photo</b> <span class='hint'>· the description you'll be tested against</span>"+
+       "<p style='margin:6px 0 0'>"+S.esc(P.desc)+"</p></div>"+
+       "<div class='card'><b>"+((P.items||[]).length)+" words &amp; phrases</b>"+
+       " <span class='hint'>· "+S.esc((P.items&&P.items[0]&&P.items[0].scenario)||'General')+
+       "</span>"+wordTable(P.items)+"</div>"+
+       "<button class='btn' onclick='PD.save()' "+(P.busy?'disabled':'')+">💾 Save this photo</button>"+
+       "<span class='hint' style='margin-left:10px'>"+S.esc(P.saved)+"</span>";
+   }
+   body().innerHTML="<div class='card'><p class='sub' style='margin-top:0'>Take a photo of what's "+
+     "around you. The vision model writes a short description and pulls out the words worth "+
+     "knowing. Save it, and later you can describe the same photo from memory and see how close "+
+     "you got.</p>"+
+     "<input type='file' id='pd-file' accept='image/*' capture='environment' style='display:none' onchange='PD.chosen(this)'>"+
+     "<button class='btn' onclick=\"document.getElementById('pd-file').click()\">📷 Take / choose photo</button> "+
+     go+prev+err+"</div>"+out;
+ }
+
+ // ---- review --------------------------------------------------------------
+ function thumbs(){
+   var ps=photos().filter(function(p){ return !p.imgGone; });
+   var retired=photos().length-ps.length;
+   var note=retired?("<p class='hint'>"+retired+" photo"+(retired===1?" has":"s have")+
+     " had the image freed — "+(retired===1?"its":"their")+
+     " words and scores are kept, see All photos.</p>"):"";
+   if(!ps.length) return note+"<div class='card'>No photos to review"+
+     (retired?" — every saved image has been freed.":" yet — capture one first.")+"</div>";
+   return "<div style='display:flex;flex-wrap:wrap;gap:10px'>"+ps.map(function(p){
+     var best=(p.recalls||[]).reduce(function(m,r){return Math.max(m,r.score||0);},0);
+     var badge=(p.recalls&&p.recalls.length)?("<div class='hint'>best "+best+"/100</div>"):
+               "<div class='hint'>not tried</div>";
+     return "<div style='width:150px;cursor:pointer' onclick=\"PD.open('"+p.id+"')\">"+
+       "<img src='"+S.esc(p.img)+"' style='width:150px;height:110px;object-fit:cover;border-radius:8px'>"+
+       "<div class='hint' style='margin-top:4px'>"+S.esc(fmtDate(p.d))+"</div>"+badge+"</div>";
+   }).join('')+"</div>"+note;
+ }
+ function review(){
+   var p=OPEN&&photos().filter(function(x){return x.id===OPEN;})[0];
+   if(p&&p.imgGone){
+     body().innerHTML="<button class='btn small' onclick='PD.back()'>← All photos</button>"+
+       "<div class='card' style='margin-top:10px'><b>Image freed</b>"+
+       "<p class='hint' style='margin:6px 0 0'>The picture for this one was deleted to save "+
+       "space, so there's nothing left to describe. Its description, words and scores are "+
+       "still here.</p></div>"+
+       "<div class='card'><b>The description</b><p style='margin:6px 0 0'>"+S.esc(p.desc)+"</p></div>"+
+       "<div class='card'><b>Words from this photo</b>"+wordTable(p.items)+"</div>";
+     return;
+   }
+   if(!p){ OPEN=null; body().innerHTML="<p class='sub'>Pick a photo, then describe it from memory.</p>"+thumbs(); return; }
+   var diff='';
+   if(R.res){
+     diff=renderDiff(R.res);
+   }
+   var reveal=(R.revealed||R.res)?
+     ("<div class='card' style='border-left:3px solid var(--good)'><b>The AI's description</b>"+
+      " <button class='btn small' style='margin-left:8px' onclick='PD.say()'>🔊 Hear it</button>"+
+      "<p style='margin:6px 0 0'>"+S.esc(p.desc)+"</p></div>"+
+      "<div class='card'><b>Words from this photo</b>"+wordTable(p.items)+"</div>"):"";
+   var err=R.err?("<p class='hint' style='color:var(--bad)'>"+S.esc(R.err)+"</p>"):"";
+   body().innerHTML=
+     "<button class='btn small' onclick='PD.back()'>← All photos</button>"+
+     "<div class='card' style='margin-top:10px'>"+
+       "<img src='"+S.esc(p.img)+"' style='max-width:100%;border-radius:10px;display:block'>"+
+       "<p class='hint' style='margin:8px 0 0'>"+S.esc(fmtDate(p.d))+" · "+
+       S.esc(p.scenario||'General')+" · "+((p.items||[]).length)+" words</p></div>"+
+     "<div class='card'><b>Describe it from memory</b>"+
+       "<p class='hint' style='margin:4px 0 8px'>Say it out loud — that's the point — then compare. "+
+       "Typing works too if you'd rather not record.</p>"+
+       "<button class='btn' id='pd-mic' onclick='PD.mic()'>🎤 Record your description</button>"+
+       "<span class='hint' id='pd-mic-status' style='margin-left:8px'></span>"+
+       "<textarea id='pd-said' rows='4' style='width:100%;margin-top:10px'>"+S.esc(R.said)+"</textarea>"+
+       "<button class='btn' onclick='PD.compare()' "+(R.busy?'disabled':'')+" style='margin-top:8px'>"+
+       (R.busy?'Comparing…':'⇄ Compare with AI')+"</button>"+
+       "<button class='btn small' style='margin-left:8px' onclick='PD.reveal()'>👁 Just show me</button>"+
+       err+diff+"</div>"+reveal;
+ }
+ function renderDiff(res){
+   var html='', missed=[];
+   (res.ops||[]).forEach(function(o){
+     if(o.op==='equal'){ html+="<span>"+S.esc(o.ref.join(' '))+" </span>"; return; }
+     if(o.op==='replace'){ missed=missed.concat(o.ref);
+       html+="<span style='color:var(--bad);text-decoration:line-through;opacity:.65'>"+S.esc(o.hyp.join(' '))+"</span> "+
+             "<b style='color:var(--good)'>"+S.esc(o.ref.join(' '))+"</b> ";
+     } else if(o.op==='delete'){ missed=missed.concat(o.ref);
+       html+="<b style='color:var(--warn)'>"+S.esc(o.ref.join(' '))+"</b> ";
+     } else if(o.op==='insert'){
+       html+="<span style='color:var(--bad);text-decoration:line-through;opacity:.65'>"+S.esc(o.hyp.join(' '))+"</span> ";
+     }
+   });
+   var col=res.score>=90?'var(--good)':(res.score>=70?'var(--warn)':'var(--bad)');
+   var out="<p class='score' style='margin-top:12px'>You matched <b style='color:"+col+"'>"+
+     res.correct+" of "+res.total+"</b> words · "+res.score+"/100</p>"+
+     "<p class='summary' style='line-height:1.9'>"+html+"</p>";
+   if(missed.length) out+="<p class='hint'>Words you didn't reach for: <b>"+S.esc(missed.join(', '))+
+     "</b>. Matching the AI word-for-word isn't the goal — but these are the ones it found useful.</p>";
+   return out;
+ }
+
+ // ---- all -----------------------------------------------------------------
+ function all(){
+   var ps=photos();
+   if(!ps.length){ body().innerHTML="<div class='card'>No saved photos yet.</div>"; return; }
+   body().innerHTML="<p class='hint'>Whatever you delete here, every word these photos "+
+     "produced stays in <b>Surrounding vocabulary → Coverage</b> — that record only ever "+
+     "grows.</p>"+
+     "<table><tr><th>Photo</th><th>Date</th><th>Scenario</th><th>Words</th>"+
+     "<th>Attempts</th><th>Best</th><th></th></tr>"+ps.map(function(p){
+       var rc=(p.recalls||[]).length;
+       var best=(p.recalls||[]).reduce(function(m,r){return Math.max(m,r.score||0);},0);
+       var cell=p.imgGone
+         ? "<span class='hint' title='Image freed to save space'>🗄 freed</span>"
+         : "<img src='"+S.esc(p.img)+"' style='width:64px;height:44px;object-fit:cover;"+
+           "border-radius:5px;cursor:pointer' onclick=\"PD.open('"+p.id+"')\">";
+       var free=p.imgGone ? "" :
+         "<button class='btn small' title='Delete just the image, keep the words and scores' "+
+         "onclick=\"PD.freeImage('"+p.id+"')\">🗄 Free image</button> ";
+       return "<tr><td>"+cell+"</td>"+
+         "<td>"+S.esc(fmtDate(p.d))+"</td><td>"+S.esc(p.scenario||'General')+"</td>"+
+         "<td>"+((p.items||[]).length)+"</td><td>"+rc+"</td><td>"+(rc?best+"/100":"—")+"</td>"+
+         "<td style='text-align:right;white-space:nowrap'>"+free+
+         "<button class='btn small' style='background:#3a2029;color:#ff9db0' "+
+         "onclick=\"PD.del('"+p.id+"')\">&#10005;</button></td></tr>";
+     }).join('')+"</table>";
+ }
+
+ window.PD={
+   chosen:function(input){
+     var f=input.files&&input.files[0]; if(!f) return;
+     P.err=''; P.desc=''; P.items=null; P.saved='';
+     downscale(f,1024,function(b){
+       if(!b){ P.err='Could not read that image.'; render(); return; }
+       P.blob=b; if(P.url) URL.revokeObjectURL(P.url); P.url=URL.createObjectURL(b); render();
+     });
+   },
+   analyze:function(){
+     if(!P.blob||P.busy) return;
+     P.busy=true; P.err=''; P.saved=''; render();
+     var fd=new FormData(); fd.append('image',P.blob,'photo.jpg');
+     fetch('/vocab_photo',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
+       P.busy=false;
+       if(j.error){ P.err=j.error; render(); return; }
+       P.desc=j.description||'';
+       P.items=(j.items||[]).map(function(it){return {headword:it.headword||'',definition:it.definition||'',
+         example:it.example||'',type:it.type||'collocation',scenario:it.scenario||'General'};});
+       if(!P.desc) P.err='The model returned no description — the prompt may have been edited to drop it (Setting Panel → Photo vocabulary prompt).';
+       render();
+     }).catch(function(){ P.busy=false; P.err='Could not reach the server.'; render(); });
+   },
+   save:function(){
+     if(!P.blob||P.busy) return;
+     P.busy=true; P.saved='Saving…'; render();
+     var fd=new FormData(); fd.append('image',P.blob,'photo.jpg');
+     fetch('/photo_save',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
+       P.busy=false;
+       if(j.error){ P.saved=''; P.err=j.error; render(); return; }
+       var entry={id:j.id, img:j.url, d:S.today(), desc:P.desc,
+                  scenario:(P.items&&P.items[0]&&P.items[0].scenario)||'General',
+                  items:P.items||[], recalls:[]};
+       writePhotos(function(cur){ return [entry].concat(cur||[]); });
+       recordSeen(entry);   // permanent, survives deleting the photo later
+       P.saved='Saved ✓ — find it under Review.';
+       render();
+     }).catch(function(){ P.busy=false; P.saved=''; P.err='Could not reach the server.'; render(); });
+   },
+   open:function(id){ OPEN=id; MODE='review'; R={said:'',res:null,busy:false,err:'',revealed:false};
+     setActive('review'); render(); },
+   back:function(){ OPEN=null; render(); },
+   reveal:function(){ R.revealed=true; render(); },
+   say:function(){ var p=photos().filter(function(x){return x.id===OPEN;})[0];
+     if(p&&S.speak) S.speak(p.desc,0.95); },
+   compare:function(){
+     var ta=document.getElementById('pd-said');
+     R.said=ta?ta.value:'';
+     var p=photos().filter(function(x){return x.id===OPEN;})[0];
+     if(!p) return;
+     if(!R.said.trim()){ R.err='Say or type your description first.'; render(); return; }
+     R.busy=true; R.err=''; render();
+     var fd=new FormData(); fd.append('ref',p.desc); fd.append('said',R.said);
+     fetch('/photo_compare',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
+       R.busy=false;
+       if(j.error){ R.err=j.error; render(); return; }
+       R.res=j; R.revealed=true;
+       writePhotos(function(cur){
+         return (cur||[]).map(function(x){
+           if(x.id!==p.id) return x;
+           var rl=(x.recalls||[]).concat([{d:S.today(),score:j.score,text:R.said}]);
+           return Object.assign({},x,{recalls:rl});
+         });
+       });
+       render();
+     }).catch(function(){ R.busy=false; R.err='Could not reach the server.'; render(); });
+   },
+   del:function(id){
+     if(!confirm('Delete this photo entirely — image, description and your attempts?\n\n'+
+                 'Its words stay in Surrounding vocabulary → Coverage either way. '+
+                 'If you only want the disk space back, use "Free image" instead.')) return;
+     var fd=new FormData(); fd.append('id',id);
+     fetch('/photo_delete',{method:'POST',body:fd}).catch(function(){});
+     writePhotos(function(cur){ return (cur||[]).filter(function(x){return x.id!==id;}); });
+     if(OPEN===id) OPEN=null;
+     render();
+   },
+   // reclaim the image bytes but keep the description, the word list and every
+   // recall score — the photo just retires from the review rotation
+   freeImage:function(id){
+     if(!confirm('Delete just the image file?\n\nThe description, its words and your '+
+                 'recall scores are kept — but without the picture there is nothing '+
+                 'left to describe, so this photo drops out of Review.')) return;
+     var fd=new FormData(); fd.append('id',id);
+     fetch('/photo_delete',{method:'POST',body:fd}).catch(function(){});
+     writePhotos(function(cur){ return (cur||[]).map(function(x){
+       return x.id===id ? Object.assign({},x,{imgGone:true}) : x; }); });
+     render();
+   },
+   mic:function(){
+     var btn=document.getElementById('pd-mic'), st=document.getElementById('pd-mic-status');
+     if(btn.classList.contains('on')){ if(window._pdmr) window._pdmr.stop(); return; }
+     if(!navigator.mediaDevices){ st.textContent='Recording not supported here.'; return; }
+     navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+       var mr=new MediaRecorder(stream), chunks=[]; window._pdmr=mr;
+       mr.ondataavailable=function(e){chunks.push(e.data);};
+       mr.onstop=function(){
+         stream.getTracks().forEach(function(t){t.stop();});
+         btn.classList.remove('on'); btn.textContent='🎤 Record your description';
+         st.textContent='Transcribing…';
+         var fd=new FormData();
+         fd.append('audio',new File(chunks,'recall.webm',{type:'audio/webm'}),'recall.webm');
+         fd.append('model','base'); fd.append('lang','en');
+         // saved beside the photos, not loose in the library root
+         fd.append('save_folder','PhotoDescriptions/recall');
+         fetch('/transcribe',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(j){
+           if(j.error){ st.textContent='Transcription failed: '+j.error+' — type it instead.'; return; }
+           poll(j.job, Date.now(), st);
+         }).catch(function(){ st.textContent='Could not reach the server — type it instead.'; });
+       };
+       mr.start(); btn.classList.add('on'); btn.textContent='■ Stop';
+       st.textContent='Recording — describe the photo…';
+     }).catch(function(){ st.textContent='Microphone permission denied.'; });
+   }
+ };
+ function poll(job,t0,st){
+   fetch('/tprogress/'+job).then(function(r){return r.json();}).then(function(j){
+     if(j.error){ st.textContent='Transcription failed: '+j.error+' — type it instead.'; return; }
+     if(j.done){
+       R.said=j.text||'';
+       var ta=document.getElementById('pd-said'); if(ta) ta.value=R.said;
+       st.textContent='Transcribed in '+Math.round((Date.now()-t0)/1000)+'s — fix any slips, then compare.';
+       return;
+     }
+     st.textContent='Transcribing… '+Math.round((Date.now()-t0)/1000)+'s';
+     setTimeout(function(){poll(job,t0,st);},1200);
+   }).catch(function(){ st.textContent='Lost contact with the transcriber — type it instead.'; });
+ }
+ function setActive(m){
+   MODE=m;
+   document.querySelectorAll('#photodesc .drillnav .btn').forEach(function(b){
+     b.classList.toggle('active', b.getAttribute('data-m')===m); });
+ }
+ window.pdMode=function(btn){ setActive(btn.getAttribute('data-m')); OPEN=null; render(); };
+ if(document.getElementById('pd-body')) render();
+})();
+"""
+
+
+def _photo_desc_panel():
+    return ("<section id='photodesc' class='tabpanel hidden'>"
+            "<h1>Describe a photo</h1>"
+            "<p class='sub'>Photograph what's around you, let the model describe it and name the "
+            "vocabulary, then come back later and describe the same photo from memory — out loud — "
+            "and see word-for-word how close you got.</p>"
+            "<div class='drillnav'>"
+            "<button class='btn small active' data-m='capture' onclick='pdMode(this)'>📷 New photo</button>"
+            "<button class='btn small' data-m='review' onclick='pdMode(this)'>🧠 Review</button>"
+            "<button class='btn small' data-m='all' onclick='pdMode(this)'>🗂 All photos</button>"
+            "</div><div id='pd-body'></div></section>"
+            "<script>%s</script>" % _PHOTO_DESC_JS)
 
 
 def _grammar_panel(items):
@@ -3606,9 +4179,18 @@ _DICTATION_JS = r"""
 
 _LISTENLOG_JS = r"""
 (function(){
- var S=window.SkillStore; var SORT='n';
+ var S=window.SkillStore; var SORT='n'; var SHOWSKIP=false;
  function errs(){ return S.get('dict_errors',{}); }
  function body(){ return document.getElementById('llog-body'); }
+ // Words you've decided aren't worth chasing. Missing "the" in dictation is a
+ // fact about connected speech, not a gap you can drill — and left in, those
+ // rows sit at the top of the table and bury the ones that matter.
+ function skipped(){
+   var m={}; (S.get('dict_skip',[])||[]).forEach(function(w){ m[(''+w).toLowerCase()]=1; });
+   return m;
+ }
+ // removals have to stick, so skip-list writes replace the key wholesale
+ function setSkip(fn){ S.update('dict_skip',[],fn,true); }
  function kindLabel(k){
    return k==='misheard' ? 'heard as something else'
         : k==='missed'   ? 'not heard at all'
@@ -3628,22 +4210,48 @@ _LISTENLOG_JS = r"""
  }
  function render(){
    var el=body(); if(!el) return;
-   var r=rows();
-   if(!r.length){
+   var allRows=rows();
+   if(!allRows.length){
      el.innerHTML="<div class='card'><h4>Nothing logged yet</h4>"+
        "<p>Every word you miss in a dictation lands here automatically. "+
        "Do a few clips on the practice tab and come back.</p></div>";
      return;
    }
+   var sk=skipped();
+   var r=allRows.filter(function(x){ return !sk[x.word.toLowerCase()]; });
+   var hidden=allRows.filter(function(x){ return sk[x.word.toLowerCase()]; });
    var repeat=r.filter(function(x){return x.n>1;});
    var total=r.reduce(function(a,x){return a+x.n;},0);
+   // one click for the whole function-word class — that's what's actually
+   // clogging the top of this table
+   var fw=(window.VOCAB_FUNCTION_WORDS||[]);
+   var fwPending=fw.length ? allRows.filter(function(x){
+     return !sk[x.word.toLowerCase()] && fw.indexOf(x.word.toLowerCase())>=0; }).length : 0;
    var head="<div class='card' style='display:flex;gap:22px;flex-wrap:wrap;align-items:center'>"+
      "<span><b style='font-size:22px'>"+r.length+"</b> <span class='hint'>distinct words missed</span></span>"+
      "<span><b style='font-size:22px'>"+total+"</b> <span class='hint'>total misses</span></span>"+
      "<span><b style='font-size:22px;color:var(--bad)'>"+repeat.length+"</b> <span class='hint'>missed more than once</span></span>"+
+     (hidden.length?("<span><b style='font-size:22px;color:var(--mut)'>"+hidden.length+
+       "</b> <span class='hint'>skipped</span></span>"):"")+
      "<span style='flex:1'></span>"+
+     (fwPending?("<button class='btn small' id='llog-skipfw'>🚫 Skip "+fwPending+
+       " function word"+(fwPending===1?"":"s")+"</button>"):"")+
+     (hidden.length?("<button class='btn small' id='llog-showskip'>"+(SHOWSKIP?'▾':'▸')+
+       " Skipped ("+hidden.length+")</button>"):"")+
      "<button class='btn small' id='llog-drill'>➕ Add repeats to Practice single word</button>"+
      "<button class='btn small' id='llog-reset' style='background:#3a2030;color:#ff9db0'>🗑 Reset</button></div>";
+   if(SHOWSKIP && hidden.length){
+     head+="<div class='card'><b>Skipped words</b> <span class='hint'>· still logged, just not "+
+       "shown above. Click one to put it back.</span><div class='words' style='margin-top:8px'>"+
+       hidden.map(function(x){
+         return "<span class='wpill seek' data-unskip=\""+S.esc(x.word)+"\" title='Show this word again'>"+
+           S.esc(x.word)+" <span class='hint'>×"+x.n+"</span> ↩</span>"; }).join('')+"</div></div>";
+   }
+   if(!r.length){
+     el.innerHTML=head+"<div class='card'>Every logged word is skipped. Reveal some above to "+
+       "see the table again.</div>";
+     return;
+   }
    function hd(k,label){ return "<th class='llsort' data-s='"+k+"' style='cursor:pointer'>"+label+(SORT===k?' ▼':'')+"</th>"; }
    var body_=r.map(function(x){
      var col=x.n>2?'var(--bad)':x.n>1?'var(--warn)':'var(--mut)';
@@ -3653,7 +4261,10 @@ _LISTENLOG_JS = r"""
        "<td class='hint'>"+kindLabel(x.kind)+"</td>"+
        "<td>"+heard+"</td>"+
        "<td class='hint'>"+S.esc(x.last)+"</td>"+
-       "<td style='text-align:right'><button class='btn small' data-say=\""+S.esc(x.word)+"\">🔊</button></td></tr>";
+       "<td style='text-align:right;white-space:nowrap'>"+
+       "<button class='btn small' data-say=\""+S.esc(x.word)+"\">🔊</button> "+
+       "<button class='btn small llog-skip' data-skip=\""+S.esc(x.word)+
+       "\" title='Skip this word — hide it from the table without losing the count'>🚫</button></td></tr>";
    }).join('');
    el.innerHTML=head+"<table class='pwt'><tr>"+hd('word','Word')+hd('n','Missed')+
      "<th>Mostly</th><th>What you wrote instead</th>"+hd('last','Last')+"<th></th></tr>"+body_+"</table>"+
@@ -3666,9 +4277,35 @@ _LISTENLOG_JS = r"""
    if((b=t.closest('#llog-reset'))){
      if(!confirm('Clear the whole listening error log?\n\nThis cannot be undone.')) return;
      S.set('dict_errors',{}); render(); return; }
+   if((b=t.closest('.llog-skip'))){
+     var w=(b.getAttribute('data-skip')||'').toLowerCase();
+     setSkip(function(cur){ cur=(cur||[]).slice();
+       if(cur.map(function(x){return (''+x).toLowerCase();}).indexOf(w)<0) cur.push(w);
+       return cur; });
+     render(); return; }
+   if((b=t.closest('[data-unskip]'))){
+     var u=(b.getAttribute('data-unskip')||'').toLowerCase();
+     setSkip(function(cur){ return (cur||[]).filter(function(x){
+       return (''+x).toLowerCase()!==u; }); });
+     render(); return; }
+   if((b=t.closest('#llog-showskip'))){ SHOWSKIP=!SHOWSKIP; render(); return; }
+   if((b=t.closest('#llog-skipfw'))){
+     var fw=window.VOCAB_FUNCTION_WORDS||[];
+     var hits=rows().map(function(x){return x.word.toLowerCase();})
+                    .filter(function(w){ return fw.indexOf(w)>=0; });
+     if(!hits.length) return;
+     setSkip(function(cur){ cur=(cur||[]).slice();
+       var have={}; cur.forEach(function(x){ have[(''+x).toLowerCase()]=1; });
+       hits.forEach(function(w){ if(!have[w]){ have[w]=1; cur.push(w); } });
+       return cur; });
+     render(); return; }
    if((b=t.closest('#llog-drill'))){
-     var words=rows().filter(function(x){return x.n>1;}).map(function(x){return x.word;});
-     if(!words.length){ alert('Nothing has been missed more than once yet.'); return; }
+     // skipped words are ones you've said aren't worth chasing, so they don't
+     // belong in the practice queue either
+     var sk=skipped();
+     var words=rows().filter(function(x){
+       return x.n>1 && !sk[x.word.toLowerCase()]; }).map(function(x){return x.word;});
+     if(!words.length){ alert('Nothing unskipped has been missed more than once yet.'); return; }
      var added=0;
      S.update('pw_custom',[],function(cur){ cur=(cur||[]).slice(); var have={};
        cur.forEach(function(w){ have[(''+w).toLowerCase()]=1; });
@@ -3693,6 +4330,10 @@ def _listening_log_panel(hidden=True):
             "One miss is noise; the same word three times is a pattern — and for a "
             "Mandarin-L1 listener it's usually the same few causes: a weak form, a "
             "linked boundary, or a final consonant that never survived the sentence.</p>"
+            "<p class='hint' style='margin-top:-8px'>🚫 skips a word: it stays counted, "
+            "but drops out of the table and out of the practice queue. Use it on the "
+            "function words — missing <i>the</i> is a fact about connected speech, not "
+            "a gap you can drill.</p>"
             "<div id='llog-body'></div></section>"
             "<script>%s</script>" % ("" if not hidden else " hidden", _LISTENLOG_JS))
 
@@ -4450,15 +5091,21 @@ def load_transcripts(library=None, min_words=5):
     Read from <stem>.txt rather than result.json, which doesn't keep the
     transcript. Recordings below `min_words` are placeholders or non-English
     clips and would only add noise.
+
+    Walks the whole library rather than just its top level: recordings can be
+    filed into subfolders (a month, a topic), and a grouping folder must never
+    make a recording invisible to this report.
     """
     lib = library or library_dir()
     out = []
     if not os.path.isdir(lib):
         return out
-    for name in sorted(os.listdir(lib)):
-        d = os.path.join(lib, name)
-        if not os.path.isdir(d):
-            continue
+    dirs = []
+    for dirpath, _subdirs, _files in os.walk(lib):
+        if dirpath != lib:
+            dirs.append(dirpath)
+    for d in sorted(dirs):
+        name = os.path.basename(d)
         txt = os.path.join(d, name + ".txt")
         if not os.path.exists(txt):
             continue
@@ -4957,7 +5604,9 @@ def _listening_vocab_panel(hidden=True):
 
 
 def _skill_panels(items):
-    return (_SKILLS_UTIL_JS + _vocab_panel() + _grammar_panel(items)
+    return (_SKILLS_UTIL_JS + _vocab_panel()
+            + _photo_desc_panel()
+            + _grammar_panel(items)
             + _dictation_panel() + _listening_log_panel()
             # the shared table component, defined once — the speaking panel
             # renders an empty state when there are no transcripts, so it can't
@@ -4995,12 +5644,20 @@ def _recorded_at(d):
 
     Prefers the timestamp embedded in the filename: it is the moment the audio
     was captured, and unlike mtime it doesn't move when the file is re-saved by
-    a re-analysis. Falls back to the file's modification time, then the date.
+    a re-analysis. Then `recorded_at`, stamped into result.json from the media
+    file while it still existed — this is what keeps the ordering correct after
+    the audio is pruned. Falls back to mtime, then the date.
     """
     import datetime
     ts = _timestamp_from_name(str(d.get("title", "")))
     if ts:
         return ts
+    ra = d.get("recorded_at")
+    if isinstance(ra, str) and ra:
+        try:
+            return datetime.datetime.fromisoformat(ra)
+        except ValueError:
+            pass
     mt = d.get("_mtime")
     if isinstance(mt, (int, float)) and mt > 0:
         try:
@@ -5028,7 +5685,8 @@ def _when_label(d):
     """Sidebar timestamp — includes the time when we know it, so same-day
     recordings are distinguishable and the ordering is verifiable."""
     at = _recorded_at(d)
-    if at and (_timestamp_from_name(str(d.get("title", ""))) or d.get("_mtime")):
+    if at and (_timestamp_from_name(str(d.get("title", "")))
+               or d.get("recorded_at") or d.get("_mtime")):
         return at.strftime("%Y-%m-%d %H:%M")
     return str(d.get("date", ""))
 
@@ -5177,10 +5835,11 @@ _WEEKLY_PRACTICE_JS = r"""
    // there hid every clip done since the last recording. (Concretely: 40 clips
    // practised, only 30 counted, because the newest session postdated the
    // anchor.) Run these two off whichever is more recent instead.
-   var last=lastPractised(scores,['dict:','reading:']);
+   var last=lastPractised(scores,['dict:','reading:','word:']);
    var w=windows(last>anchor?last:anchor);
    el.innerHTML=report('dict:','Listening','clips',scores,w)+
-                report('reading:','Reading','passages',scores,w);
+                report('reading:','Reading Passage','passages',scores,w)+
+                report('word:','Reading Single Word','words',scores,w);
  });
 })();
 """
@@ -5205,62 +5864,24 @@ def _weekly_review_panel(history, items=None, embedded=False):
     current = [row for row, day in dated if current_start <= day <= anchor]
     previous = [row for row, day in dated if previous_start <= day <= previous_end]
 
-    def avg(rows, key):
-        vals = [r.get(key) for r in rows if isinstance(r.get(key), (int, float))]
-        return round(sum(vals) / len(vals)) if vals else None
-
     def duration(rows):
         return sum(r.get("duration_sec", 0) for r in rows
                    if isinstance(r.get("duration_sec"), (int, float)))
 
-    metrics = [("pron_score", "Overall", True), ("accuracy", "Accuracy", True),
-               ("fluency_score", "Fluency", True), ("prosody", "Prosody", True),
-               ("grammar_errors", "Grammar errors", False)]
-    rows = ""
-    for key, label, higher_is_better in metrics:
-        now, before = avg(current, key), avg(previous, key)
-        if now is None and before is None:
-            continue
-        change = "—"
-        cls = ""
-        if now is not None and before is not None:
-            diff = now - before
-            good = diff > 0 if higher_is_better else diff < 0
-            cls = "up" if good and diff else ("down" if diff else "")
-            change = "%+d" % diff
-        rows += ("<tr><td>%s</td><td>%s</td><td>%s</td><td class='%s'>%s</td></tr>"
-                 % (_esc(label), "—" if before is None else before,
-                    "—" if now is None else now, cls, change))
-    if not rows:
-        rows = "<tr><td colspan='4' class='hint'>No comparable scored metrics yet.</td></tr>"
-
     cur_sec, prev_sec = duration(current), duration(previous)
-    word, word_count = _plan_word(items)
-    grammar, grammar_count = _plan_grammar(items)
-    focus = []
-    if word:
-        focus.append("Pronunciation: <b>%s</b>%s" % (_esc(word),
-                     " (%d occurrences)" % word_count if word_count > 1 else ""))
-    if grammar:
-        focus.append("Grammar: <b>%s</b>%s" % (_esc(grammar),
-                     " (%d occurrences)" % grammar_count if grammar_count > 1 else ""))
-    if not focus:
-        focus.append("Keep gathering evidence with a short recording and one dictation.")
     heading = "<h2>Weekly review</h2>" if embedded else "<h1>Weekly review</h1>"
     return (heading +
-            "<p class='sub'>Week ending <b>%s</b>, compared with %s–%s.</p>"
+            "<p class='sub'>Week ending <b>%s</b>. How much you practised, and how "
+            "each kind of practice scored.</p>"
             "<h2>Speaking</h2>"
             "<div class='metrics'><div class='card'><b style='font-size:24px'>%d</b><div class='hint'>recordings this week</div></div>"
             "<div class='card'><b style='font-size:24px'>%s</b><div class='hint'>recorded practice</div></div>"
             "<div class='card'><b style='font-size:24px'>%s</b><div class='hint'>previous week</div></div></div>"
-            "<h2>Score movement</h2><table><tr><th>Metric</th><th>Previous</th><th>This week</th><th>Change</th></tr>%s</table>"
             "<h2>Listening &amp; Reading</h2><div id='weekly-practice-report' class='metrics'></div>"
-            "<h2>Next week’s focus</h2><div class='card'><ul><li>%s</li></ul>"
-            "<p class='hint'>Treat score movement as a signal, not a verdict: recording length and task difficulty can change it.</p></div>"
             "<script>window.WEEKLY_ANCHOR=%s;%s</script>"
-            % (anchor.strftime("%b %-d, %Y"), previous_start.strftime("%b %-d"), previous_end.strftime("%b %-d"),
+            % (anchor.strftime("%b %-d, %Y"),
                len(current), _fmt_total(cur_sec) if cur_sec else "—", _fmt_total(prev_sec) if prev_sec else "—",
-               rows, "</li><li>".join(focus), json.dumps(anchor.isoformat()), _WEEKLY_PRACTICE_JS))
+               json.dumps(anchor.isoformat()), _WEEKLY_PRACTICE_JS))
 
 
 def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
@@ -5298,7 +5919,10 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     nav += ("<a data-panel='vocablisten'>🎧 Listening vocabulary"
             "<small>what you take in</small></a>")
     nav += "<a data-panel='stories'>📖 Reading</a>"
-    nav += "<a data-panel='vocab'>📇 Vocabulary</a>"
+    nav += ("<a data-panel='vocab'>🧭 Surrounding vocabulary"
+            "<small>photos and captures</small></a>")
+    nav += ("<a data-panel='photodesc'>🖼 Describe a photo"
+            "<small>say what you see, then check</small></a>")
     nav += "<p class='navsec'>Train — ear &amp; sound</p>"
     nav += "<a data-panel='howto'>📣 How-to: tricky words</a>"
     nav += "<a data-panel='listening'>🔉 Listening (ear training)</a>"
@@ -5372,12 +5996,16 @@ def rec_dir_for(stem, library=None, create=True):
     return d
 
 
+# Every media extension the app treats as a recording. Module-level because
+# both the dashboard loader and the storage-pruning helpers need it.
+_AV = (".m4a", ".mp3", ".wav", ".mp4", ".mov", ".aac", ".flac", ".ogg", ".webm")
+
+
 def build_dashboard_for_dir(out_dir):
     """Aggregate every <name>.result.json found anywhere under a folder (so each
     recording can live in its own subfolder) into one dashboard, using
     history.json at the folder root for the Summary curve."""
     project_root = os.path.dirname(os.path.abspath(out_dir))  # dashboard.html lives here
-    _AV = (".m4a", ".mp3", ".wav", ".mp4", ".mov", ".aac", ".flac", ".ogg", ".webm")
     items = []
     paths = []
     for root, _dirs, files in os.walk(out_dir):
@@ -5392,15 +6020,18 @@ def build_dashboard_for_dir(out_dir):
             continue
         # locate this recording's audio file (same folder) for click-to-play
         d = os.path.dirname(p)
+        item["has_audio"] = False
         for fn in sorted(os.listdir(d)):
             if fn.lower().endswith(_AV):
                 item["audio_rel"] = os.path.relpath(os.path.join(d, fn), project_root)
                 item["audio_abs"] = os.path.join(d, fn)
+                item["has_audio"] = True
                 try:
                     item["_mtime"] = os.path.getmtime(item["audio_abs"])
                 except OSError:
                     pass
                 break
+        _stamp_recording_meta(item, p)   # survive the media being pruned later
         _backfill_prosody(item, p)   # one-time prosody for older recordings
         items.append(item)
     history = None
@@ -5532,6 +6163,53 @@ def analyze_prosody(audio_path):
     }
 
 
+# Fields attached at load time from the filesystem — never written back into
+# result.json, because they describe where the media is, not what was said.
+_RUNTIME_KEYS = ("audio_abs", "audio_rel", "_mtime", "has_audio")
+
+
+def _save_result(item, result_path):
+    """Write an item back to its result.json, minus the runtime-only fields."""
+    try:
+        save = {k: v for k, v in item.items() if k not in _RUNTIME_KEYS}
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(save, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _stamp_recording_meta(item, result_path):
+    """Persist the facts that would otherwise only exist on the media file.
+
+    When the audio is deleted to reclaim space, `_mtime` goes with it — and a
+    recording whose title carries no timestamp then falls back to a date-only
+    sort key, which silently reshuffles same-day sessions and blanks the time
+    in the sidebar. Recording length has the same problem: it is measured from
+    the file. Writing both into result.json once, while the media is still
+    here, makes every report independent of whether the audio survives.
+    """
+    changed = False
+    if not item.get("recorded_at"):
+        at = _recorded_at(item)
+        if at:
+            item["recorded_at"] = at.isoformat(timespec="seconds")
+            changed = True
+    if item.get("duration_sec") is None:
+        ap = item.get("audio_abs")
+        if ap and os.path.exists(ap):
+            try:
+                dur = _audio_duration(ap)
+            except Exception:
+                dur = None
+            if dur:
+                item["duration_sec"] = round(float(dur), 1)
+                changed = True
+    if changed:
+        _save_result(item, result_path)
+    return changed
+
+
 def _backfill_prosody(item, result_path):
     """Compute prosody for an already-analyzed recording that predates the
     feature, and persist it into its result.json so it's only computed once."""
@@ -5547,13 +6225,7 @@ def _backfill_prosody(item, result_path):
     if not pm:
         return
     item["prosody_metrics"] = pm
-    try:
-        save = {k: v for k, v in item.items()
-                if k not in ("audio_abs", "audio_rel", "_mtime")}
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(save, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    _save_result(item, result_path)
 
 
 def _fmt_dur(sec):
@@ -5740,6 +6412,140 @@ def _practice_bars(buckets, elid, visible):
             % (elid, "" if visible else "display:none", W, H, W, grid, bars, labels))
 
 
+_WEEKLY_PRON_JS = r"""
+(function(){
+ var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+ var WEEKS=12, GOAL=%d;
+ // Every source of an Azure pronunciation score. 'rec' comes from the server
+ // (history.json); the other two are score-history prefixes in SkillStore.
+ var SERIES=[['rec','Speaking','#46b3c9'],
+             ['reading:','Reading passage','#43c59e'],
+             ['word:','Single word','#ffb454']];
+ function monday(ds){
+   var d=new Date(ds+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%%7));
+   return d.toISOString().slice(0,10);
+ }
+ function label(ds){ var p=ds.split('-'); return MON[+p[1]-1]+' '+(+p[2]); }
+ function pairs(src, scores){
+   if(src==='rec') return (window.PRON_WEEKLY_REC||[]).slice();
+   var out=[];
+   Object.keys(scores||{}).forEach(function(key){
+     if(key.indexOf(src)!==0) return;
+     (scores[key]||[]).forEach(function(x){
+       if(x && typeof x.s==='number' && x.d) out.push([x.d, x.s]);
+     });
+   });
+   return out;
+ }
+ window.addEventListener('load',function(){
+   var host=document.getElementById('pron-weekly'); if(!host)return;
+   var scores=(window.SkillStore&&window.SkillStore.get('ec_scores',{}))||{};
+   // bucket every series by the Monday of its week
+   var data=[], newest='', lo=100;
+   SERIES.forEach(function(s){
+     var by={};
+     pairs(s[0],scores).forEach(function(p){
+       var wk=monday(p[0]); (by[wk]=by[wk]||[]).push(p[1]);
+       if(wk>newest) newest=wk;
+     });
+     var avg={};
+     Object.keys(by).forEach(function(wk){
+       var v=by[wk], m=v.reduce(function(n,x){return n+x;},0)/v.length;
+       avg[wk]={v:Math.round(m*10)/10, n:v.length};
+       if(avg[wk].v<lo) lo=avg[wk].v;
+     });
+     data.push({key:s[0], label:s[1], color:s[2], avg:avg});
+   });
+   if(!newest){
+     host.innerHTML="<p class='hint'>No pronunciation scores logged yet — analyze a "+
+       "recording, or score a word in Practice single word, to start this chart.</p>";
+     return;
+   }
+   // the last WEEKS Mondays, ending at the most recent week that has data
+   var weeks=[], d=new Date(newest+'T12:00:00Z');
+   for(var i=0;i<WEEKS;i++){ weeks.unshift(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()-7); }
+
+   var W=920,H=300,L=44,R=16,T=18,B=46, iw=W-L-R, ih=H-T-B;
+   // Scores cluster high, so a 0-100 axis would flatten the trend. Zoom to the
+   // data instead, floored at 50 and always wide enough to show the goal line.
+   var top=100, bot=Math.min(50, Math.max(0, Math.floor((Math.min(lo,GOAL)-5)/5)*5));
+   function y(v){ return T+ih*(1-(v-bot)/(top-bot)); }
+   function x(i){ return L+(weeks.length<2?iw/2:iw*i/(weeks.length-1)); }
+
+   var grid='';
+   for(var g=bot; g<=top; g+=Math.max(5,Math.round((top-bot)/5/5)*5)){
+     grid+="<line x1='"+L+"' y1='"+y(g).toFixed(1)+"' x2='"+(W-R)+"' y2='"+y(g).toFixed(1)+
+           "' stroke='#24404c'/><text x='"+(L-8)+"' y='"+(y(g)+4).toFixed(1)+
+           "' fill='#9aa3bf' font-size='11' text-anchor='end'>"+g+"</text>";
+   }
+   if(GOAL>bot && GOAL<top){
+     grid+="<line x1='"+L+"' y1='"+y(GOAL).toFixed(1)+"' x2='"+(W-R)+"' y2='"+y(GOAL).toFixed(1)+
+           "' stroke='#ff9db0' stroke-width='1.5' stroke-dasharray='5 4'/>"+
+           // left-aligned: the newest week is always pinned to the right edge,
+           // which is exactly where a right-aligned label would collide with it
+           "<text x='"+(L+6)+"' y='"+(y(GOAL)-6).toFixed(1)+"' fill='#ff9db0' font-size='10' "+
+           "text-anchor='start'>goal "+GOAL+"</text>";
+   }
+   var xlab='', every=Math.max(1,Math.ceil(weeks.length/12));
+   weeks.forEach(function(wk,i){
+     if(i%%every===0||i===weeks.length-1)
+       xlab+="<text x='"+x(i).toFixed(1)+"' y='"+(H-16)+"' fill='#9aa3bf' font-size='11' "+
+             "text-anchor='middle'>"+label(wk)+"</text>";
+   });
+
+   var svg='', legend='';
+   data.forEach(function(s){
+     var pts=[];
+     weeks.forEach(function(wk,i){ if(s.avg[wk]) pts.push([x(i),y(s.avg[wk].v),wk,s.avg[wk]]); });
+     if(!pts.length) return;
+     if(pts.length>1)
+       svg+="<polyline fill='none' stroke='"+s.color+"' stroke-width='2.5' points='"+
+            pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ')+"'/>";
+     pts.forEach(function(p){
+       svg+="<circle cx='"+p[0].toFixed(1)+"' cy='"+p[1].toFixed(1)+"' r='4' fill='"+s.color+
+            "'><title>"+s.label+" — week of "+label(p[2])+": "+p[3].v+" avg over "+
+            p[3].n+" attempt"+(p[3].n===1?'':'s')+"</title></circle>";
+     });
+     legend+="<span class='lg'><i style='background:"+s.color+"'></i>"+s.label+"</span>";
+   });
+
+   host.innerHTML="<svg viewBox='0 0 "+W+" "+H+"' width='100%%' style='max-width:"+W+"px'>"+
+                  grid+svg+xlab+"</svg>";
+   var lg=document.getElementById('pron-weekly-legend'); if(lg) lg.innerHTML=legend;
+ });
+})();
+"""
+
+
+def _weekly_pron_section(history):
+    """Average pronunciation score per week — the headline view.
+
+    The improvement curve further down plots one point per recording, so a
+    short or hard session reads as a slump. Averaging by week, across every
+    Azure-scored attempt (recordings and drills alike), is what actually shows
+    the trend — which is why this leads the page and the old one-week-vs-last
+    tables no longer do.
+    """
+    rec = []
+    for row in (history or []):
+        day, score = _history_day(row), row.get("pron_score")
+        if day and isinstance(score, (int, float)):
+            rec.append([day.isoformat(), round(float(score), 1)])
+    return ("<h2>Average pronunciation score by week</h2>"
+            "<p class='sub'>Every Azure-scored attempt, averaged per week. "
+            "<b>Speaking</b> comes from your analyzed recordings, <b>Reading passage</b> "
+            "and <b>Single word</b> from those practice panels. A missing dot is a week "
+            "with no attempts. Hover a dot for the exact average and how many attempts "
+            "it rests on.</p>"
+            "<div class='chartcard'><div id='pron-weekly'></div>"
+            "<div class='legend' id='pron-weekly-legend'></div></div>"
+            "<p class='hint'>Read the slope, not the wobble: recording length and "
+            "task difficulty move any single week, and a dot resting on 3 attempts "
+            "says far less than one resting on 300.</p>"
+            "<script>window.PRON_WEEKLY_REC=%s;%s</script>"
+            % (json.dumps(rec), _WEEKLY_PRON_JS % PRON_GOAL))
+
+
 def _practice_time_section(rows):
     """'How much have I actually practised?' — total time by day / week / month."""
     import datetime
@@ -5788,7 +6594,7 @@ def _practice_time_section(rows):
         % (" active" if mode == "day" else "", mode, label)
         for mode, label in (("day", "Daily"), ("week", "Weekly"), ("month", "Monthly")))
 
-    return ("<h2>Time spent on English</h2>"
+    return ("<h2>Time spent on Speaking</h2>"
             "<p class='sub'>Measured from the length of every recording you've "
             "analyzed. Daily shows the last 30 days, weekly the last 26 weeks, "
             "monthly the last 12 months — empty slots are days you didn't practise.</p>"
@@ -5798,7 +6604,7 @@ def _practice_time_section(rows):
             % (stats, btns, charts, _esc(best_day), _fmt_total(best_sec)))
 
 
-def _progress_body(history, items=None, top_extra="", rec_ids=None):
+def _progress_body(history, items=None, rec_ids=None):
     """Inner HTML: improvement curve (SVG) + delta chips + session table."""
     n = len(history)
     # plot geometry
@@ -5964,57 +6770,22 @@ def _progress_body(history, items=None, top_extra="", rec_ids=None):
                       "⏱ Total recorded practice: <b>%s</b> across %d recording(s)."
                       "</p>" % (_fmt_total(total_sec), counted))
 
-    return ("<h1>Your improvement curve</h1>"
-            "<p class='sub'>%s session(s) logged. Higher is better for scores; "
-            "lower is better for grammar errors.</p>"
+    return ("<h1>Your Speaking improvement curve</h1>"
+            "<p class='sub'>One point per analyzed recording, oldest first — %s "
+            "logged. Higher is better for scores; lower is better for grammar "
+            "errors. For the smoothed week-by-week view, see the chart at the "
+            "top of this page.</p>"
             "<div class='chartcard'>%s<div class='legend'>%s</div></div>%s"
-            "%s"                              # goal + since-you-started (top_extra)
             "%s"                              # time-spent charts
             "%s<table><tr>%s</tr>%s</table>"
-            % (n, chart, legend, deltas, top_extra,
+            % (n, chart, legend, deltas,
                _practice_time_section(practice_rows), total_line, head, body))
 
 
-PRON_GOAL = 85  # target overall pronunciation score
-
-
-def _goal_and_compare(history):
-    scored = [h for h in history if h.get("pron_score") is not None]
-    if not scored:
-        return ""
-    latest = scored[-1]["pron_score"]
-    pct = max(0, min(100, round(latest / PRON_GOAL * 100)))
-    bar = ("<div class='sb-t' style='height:10px'><div class='sb-f' "
-           "style='width:%s%%'></div></div>" % pct)
-    gap = PRON_GOAL - latest
-    goal_txt = ("🎯 You hit the %s goal!" % PRON_GOAL if gap <= 0
-                else "🎯 %d point%s to your goal of %s overall."
-                % (gap, "" if gap == 1 else "s", PRON_GOAL))
-    goal = ("<div class='card'><b>Goal</b> — current overall <b>%s</b> / %s%s"
-            "<p class='hint'>%s</p></div>" % (latest, PRON_GOAL, bar, goal_txt))
-
-    compare = ""
-    if len(scored) >= 2:
-        first, last = scored[0], scored[-1]
-        rows = ""
-        for key, label in [("pron_score", "Overall"), ("accuracy", "Accuracy"),
-                           ("fluency_score", "Fluency"), ("prosody", "Prosody"),
-                           ("grammar_errors", "Grammar errors")]:
-            a, b = first.get(key), last.get(key)
-            if a is None or b is None:
-                continue
-            d = b - a
-            good = d < 0 if key == "grammar_errors" else d > 0
-            cls = "up" if good and d else ("down" if d and not good else "")
-            arrow = "▲" if d > 0 else ("▼" if d < 0 else "—")
-            rows += ("<tr><td>%s</td><td>%s</td><td>%s</td>"
-                     "<td class='%s'>%s%+d</td></tr>"
-                     % (label, a, b, cls, arrow, d))
-        compare = ("<h2>Since you started</h2>"
-                   "<table><tr><th>Metric</th><th>First (%s)</th><th>Latest (%s)</th>"
-                   "<th>Change</th></tr>%s</table>"
-                   % (_esc(first.get("date", "")), _esc(last.get("date", "")), rows))
-    return goal + compare
+# Target overall pronunciation score. No longer rendered as its own progress
+# bar — it's the dashed reference line on the weekly average chart, where a
+# single number is far easier to read against an actual trend.
+PRON_GOAL = 85
 
 
 def _blind_spots(items):
@@ -6214,6 +6985,89 @@ def build_project_backup(root=None):
     return buf.getvalue(), name, len(members)
 
 
+def prunable_media(root=None, older_than_days=0):
+    """Media files that can be deleted without losing anything.
+
+    The rule is deliberately strict: a media file is prunable only if a
+    `.result.json` sits in the same folder. That result is the whole reason
+    deletion is safe — it holds the scores, the transcript and the word-level
+    timings, so everything the reports render survives. Audio with no result
+    beside it has never been analyzed; it is the only copy of that material and
+    is never touched, no matter how old.
+
+    Returns (rows, total_bytes) where each row is
+    (path, bytes, mtime, recording folder name).
+    """
+    import time
+    lib = root or library_dir()
+    cutoff = time.time() - older_than_days * 86400 if older_than_days else None
+    rows, total = [], 0
+    if not os.path.isdir(lib):
+        return rows, total
+    for dirpath, _dirs, files in os.walk(lib):
+        if not any(f.endswith(".result.json") for f in files):
+            continue
+        for fn in sorted(files):
+            if not fn.lower().endswith(_AV):
+                continue
+            p = os.path.join(dirpath, fn)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if cutoff is not None and st.st_mtime > cutoff:
+                continue
+            rows.append((p, st.st_size, st.st_mtime,
+                         os.path.relpath(dirpath, lib)))
+            total += st.st_size
+    rows.sort(key=lambda r: r[2])          # oldest first
+    return rows, total
+
+
+def prune_media(root=None, older_than_days=0):
+    """Delete prunable media. Returns (deleted_count, bytes_freed, errors).
+
+    Every affected recording is re-stamped first, so `recorded_at` and the
+    duration are in result.json before the file they were derived from goes
+    away. Without that the reports would still render, but same-day sessions
+    would reshuffle and the Length column would go blank.
+    """
+    lib = root or library_dir()
+    rows, _total = prunable_media(lib, older_than_days)
+    by_dir = {}
+    for path, _size, _mt, _name in rows:
+        by_dir.setdefault(os.path.dirname(path), []).append(path)
+
+    deleted, freed, errors = 0, 0, []
+    for dirpath, paths in by_dir.items():
+        # stamp first: after this, the result no longer needs the media
+        for fn in sorted(os.listdir(dirpath)):
+            if not fn.endswith(".result.json"):
+                continue
+            rp = os.path.join(dirpath, fn)
+            try:
+                with open(rp, encoding="utf-8") as f:
+                    item = json.load(f)
+            except Exception as e:
+                errors.append("%s: %s" % (fn, e))
+                continue
+            item["audio_abs"] = paths[0]
+            try:
+                item["_mtime"] = os.path.getmtime(paths[0])
+            except OSError:
+                pass
+            _stamp_recording_meta(item, rp)
+        for p in paths:
+            try:
+                size = os.path.getsize(p)
+                os.remove(p)
+                deleted += 1
+                freed += size
+            except OSError as e:
+                errors.append("%s: %s" % (os.path.basename(p), e))
+    return deleted, freed, errors
+
+
 def _fmt_bytes(n):
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
@@ -6243,12 +7097,17 @@ def _backup_card():
 
 
 def _summary_panel(history, items=None, rec_ids=None):
-    """Combined weekly review and long-term progress; no separate report page."""
+    """Combined weekly review and long-term progress; no separate report page.
+
+    The weekly pronunciation trend leads: it is the one chart that answers
+    "am I getting better?" across every kind of practice, so it belongs above
+    the this-week detail rather than buried under it.
+    """
     return ("<h1>Summary &amp; progress</h1>"
+            + _weekly_pron_section(history)
             + _weekly_review_panel(history, items, embedded=True)
             + "<hr style='border:0;border-top:1px solid var(--line);margin:36px 0'>"
-            + _progress_body(history, items, top_extra=_goal_and_compare(history),
-                             rec_ids=rec_ids))
+            + _progress_body(history, items, rec_ids=rec_ids))
 
 
 def generate_progress_html(history):
@@ -6257,6 +7116,7 @@ def generate_progress_html(history):
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>English Coach — Progress</title><style>" + _DASHBOARD_CSS
             + "</style></head><body><main class='content'><div class='wrap'>"
+            + _weekly_pron_section(history)
             + _progress_body(history)
             + "<footer>Generated by English Coach — history.json drives this view.</footer>"
             "</div></main></body></html>")
