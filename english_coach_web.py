@@ -320,6 +320,28 @@ def _merge_progress(old, new, replace_keys=()):
     return merged
 
 
+@app.route("/api/azure_usage")
+def api_azure_usage():
+    """How much audio this app has sent to Azure this month.
+
+    Deliberately not "your Azure quota": there is no endpoint that reports
+    that. Azure exposes consumption only as an Azure Monitor metric on the
+    Cognitive Services account, which needs Azure AD credentials this app does
+    not hold. So this is a self-meter — exact for this app, blind to anything
+    else using the same key — and the UI says so.
+    """
+    from flask import jsonify
+    cfg = load_config()
+    try:
+        allowance = float(cfg.get("azure_allowance_hours", 5) or 0)
+    except (TypeError, ValueError):
+        allowance = 0.0
+    try:
+        return jsonify(ec.azure_usage_summary(LIBRARY, allowance_hours=allowance))
+    except Exception as e:                             # noqa: BLE001
+        return jsonify(error=str(e)[:150], hours=0, allowance_hours=allowance)
+
+
 @app.route("/api/progress", methods=["GET", "POST"])
 def api_progress():
     """The server-side replacement for localStorage: GET returns everything,
@@ -465,6 +487,15 @@ def _persist_keys_from_form(form):
     keys = {"azure_key": azure_key, "azure_region": azure_region,
             "anthropic_key": anthropic_key, "deepseek_key": deepseek_key,
             "kimi_key": kimi_key}
+    # Not a key, but it lives with them: the monthly Azure allowance the usage
+    # meter measures against. Blank means "leave as is"; 0 is a real choice
+    # (pay-as-you-go), so it must not be treated as absent.
+    raw = form.get("azure_allowance_hours", "")
+    if str(raw).strip() != "":
+        try:
+            keys["azure_allowance_hours"] = max(0.0, float(raw))
+        except (TypeError, ValueError):
+            pass
     save_config({**cfg, **keys})
     return keys
 
@@ -598,6 +629,18 @@ def _settings_panel(msg="", active=""):
             <input type='password' name='azure_key' placeholder="%s" style='width:100%%'></label><br>
           <label style='display:block;margin-top:6px'>Azure region
             <input type='text' name='azure_region' value='%s'></label><br>
+          <label style='display:block;margin-top:6px'>Monthly audio allowance
+            <input type='number' name='azure_allowance_hours' value='%s' min='0' step='0.5'
+              style='width:90px'> hours</label>
+          <p class='hint' style='margin:4px 0 0'>Azure has no API that reports
+            remaining quota, so the meter on the analysis page counts what
+            <b>this app</b> sends and subtracts it from this number. Set it to
+            your tier's monthly allowance — the free F0 tier is commonly 5
+            audio hours; check the
+            <a href='https://azure.microsoft.com/pricing/details/speech-services/'
+               target='_blank' rel='noopener' style='color:var(--accent)'>pricing
+            page</a> for your tier. <b>0</b> = pay-as-you-go: usage is still
+            shown, but nothing is presented as a limit.</p>
           <p class='hint' style='margin:10px 0 4px'>Grammar analysis — provide ONE key. If both are set, DeepSeek is used.</p>
           <label style='display:block;margin-top:6px'>DeepSeek key <span class='hint'>· recommended — cheaper &amp; reachable from China (used by default)</span>
             <input type='password' name='deepseek_key' placeholder="%s" style='width:100%%'></label>
@@ -629,7 +672,8 @@ def _settings_panel(msg="", active=""):
       %s
       <p class='hint' style='margin-top:16px'><a href='/logout' style='color:var(--accent)'>Log out</a></p>
     </section>
-    """ % (note, ph(akey), aregion, ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage))
+    """ % (note, ph(akey), aregion, cfg.get("azure_allowance_hours", 5),
+           ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage))
 
 
 def _load_items_and_history():
@@ -759,14 +803,49 @@ def _form_panel(msg="", active=""):
           </div>
         </div>
         <div class='card'>
-          <label><input type='checkbox' name='do_azure' checked> Pronunciation scoring (Azure)</label><br>
-          <label style='display:block;margin-top:8px'>Scoring strictness
-            <select name='strictness'>
-              <option value='standard'>Standard (Azure default)</option>
-              <option value='strict' selected>Strict</option>
-              <option value='very_strict'>Very strict</option>
-            </select></label>
+          <div style='display:flex;justify-content:space-between;align-items:flex-start;
+             gap:16px;flex-wrap:wrap'>
+            <div>
+              <label><input type='checkbox' name='do_azure' checked> Pronunciation scoring (Azure)</label><br>
+              <label style='display:block;margin-top:8px'>Scoring strictness
+                <select name='strictness'>
+                  <option value='standard'>Standard (Azure default)</option>
+                  <option value='strict' selected>Strict</option>
+                  <option value='very_strict'>Very strict</option>
+                </select></label>
+            </div>
+            <div id='az-usage' class='hint' style='min-width:210px;text-align:right'></div>
+          </div>
         </div>
+        <script>
+        // Azure publishes no "remaining quota" endpoint, so this counts what
+        // this app has sent. Failing silently is right: an unreachable meter
+        // must not imply you are out of quota.
+        (function(){
+          var box=document.getElementById('az-usage'); if(!box) return;
+          fetch('/api/azure_usage',{cache:'no-store'}).then(function(r){return r.json();})
+          .then(function(d){
+            if(!d || d.error) return;
+            var used=(d.hours||0).toFixed(2)+' h';
+            var line='<b>'+used+'</b> sent to Azure in '+(d.month||'')+
+                     ' <span style="opacity:.7">('+(d.calls||0)+' calls)</span>';
+            if(d.allowance_hours){
+              var pct=Math.min(100, d.pct||0);
+              var col = pct>=90 ? 'var(--bad)' : (pct>=70 ? 'var(--warn)' : 'var(--good)');
+              line += '<div style="margin-top:5px">'+d.remaining_hours.toFixed(2)+
+                ' h left of '+d.allowance_hours+' h</div>'+
+                '<div style="height:7px;border-radius:5px;background:var(--line);margin-top:4px">'+
+                  '<div style="height:100%%;width:'+pct.toFixed(0)+'%%;border-radius:5px;background:'+col+'"></div>'+
+                '</div>';
+            } else {
+              line += '<div style="margin-top:5px;opacity:.75">no monthly allowance set</div>';
+            }
+            line += "<div style='margin-top:5px;font-size:11.5px;opacity:.6'>counted by this app"+
+                    (d.seeded?" · history estimated":"")+"</div>";
+            box.innerHTML=line;
+          }).catch(function(){});
+        })();
+        </script>
         <button type='submit' style='font-size:16px;padding:10px 20px;border-radius:10px;
            border:0;background:var(--accent);color:#08222b;font-weight:700;cursor:pointer'>
            Analyze ▶</button>
@@ -1441,7 +1520,8 @@ def practice():
             # Miscue OFF too, or homophones (tied/tide, dyed/died) get docked for a
             # spelling mismatch the recogniser invents even when the sound is right.
             return ec.azure_pronunciation(tmp, ref, enable_prosody=False,
-                                          enable_miscue=False, locale="en-US")
+                                          enable_miscue=False, locale="en-US",
+                                          usage_kind="practice")
 
         def expected(az):
             ws = az.get("words") or []

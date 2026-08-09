@@ -127,6 +127,10 @@ delete already-published content that way (happened once).
   `/v1/transcribe` + WebSocket `/v1/stream`), reusable by other projects. Its
   streaming code (`stream_session`) is also mounted on the web app so live
   transcribe works in one process.
+- **backfill_phonemes.py** — one-off upgrade path for the error stats. Re-sends
+  old recordings to Azure purely to fetch per-phoneme `AccuracyScore`, merges
+  it into `azure.words` as `pacc` (aligned with `difflib`, never by raw index),
+  and changes nothing else. Requires `--run`; skips anything already done.
 - **Transcribe_Service_API.md** — API docs for that service.
 - **PronScore reference.html**, **Pronunciation how-to.html** — printable refs.
 - **Practice scripts/** — story `.txt` files (minimal-pair practice).
@@ -241,6 +245,104 @@ persisted via the same server-side progress store, key
   scores — e.g. tied/tide). Passages: `en-US` with prosody ON. Non-English
   transcripts are detected (`_looks_non_english`) and Azure is skipped to
   avoid all-zero scores.
+- **Azure quota cannot be fetched** — there is no such endpoint. Consumption is
+  an Azure Monitor metric (`AudioSecondsTranscribed` on the Cognitive Services
+  account) needing Azure AD creds + subscription/resource IDs, and no metric
+  reports an allowance at all. So the app self-meters: `log_azure_usage()` is
+  called from inside `azure_pronunciation()` — the single choke point every
+  caller passes through — measuring the converted wav, into
+  `VideoAudioFiles/azure_usage.json` (seeded from existing results on first
+  read, those rows flagged `seeded`). Allowance is `azure_allowance_hours` in
+  `~/.english_coach.json`; **0 means pay-as-you-go and must not render as a
+  limit**. Never label this "your Azure quota" — it is blind to other users of
+  the same key, and the UI has to keep saying "counted by this app".
+- **Speaking error log is three tabs** (`log` / `gstats` / `pstats` in
+  `_GRAMMAR_JS`). "Log a mistake" is no longer a tab — it is a toggle button
+  on the log itself (`addBar()`), so the feature survived the restructure.
+  One chart engine (`drawChart(id)`) serves both stats tabs; per-chart state
+  lives in `CHS[id]`, so ticking a series on one does not disturb the other.
+- **The trend chart must never mix measurement modes.** `pronunciation_trend()`
+  charts exact-scored recordings if any exist, else attributed ones, and
+  reports `skipped`. Blending them draws a cliff where the backfill stopped and
+  reads as a collapse in the user's speaking. Weekly buckets need
+  `TREND_MIN_WEEK` attempts to plot at all and 40 to draw a solid dot.
+- **The thin-week floor is arithmetic, not taste, and it must not swallow the
+  week.** `TREND_MIN_WEEK` was 15 by feel; θ then vanished from a real week that
+  had 14 attempts, and the chart looked broken. The floor is now 10, from the
+  rule that at *n* attempts one slip moves the rate by 100/*n* points — past ten
+  points the dot is not a measurement. Everything from 10 to 40 is jumpy rather
+  than wrong, which is what the hollow dot already says, so the floor only has
+  to kill degenerate cells. Skipped weeks come back in `series[].gaps` (week →
+  count): the chart draws each segment separately and dots the ones that jump a
+  week, and the table prints the count instead of a bare `—`. Rare sounds make
+  this routine, not exceptional — θ appears ~0.3% of the time against ð's ~3%.
+  Colours (`TREND_COLORS`) are the app's hues re-stepped into OKLCH L≈0.665 —
+  the originals `#46b3c9`/`#43c59e` are ΔE 9.4 apart to normal vision, a hard
+  fail; the rest of the app's charts still use them. Colour binds to the sound
+  key while selected, never to rank.
+- **Prosody is the only part of pronunciation assessment Azure bills extra
+  for.** Microsoft's own table: accuracy, fluency, completeness and miscue are
+  in the baseline speech-to-text price; prosody is not. In `eastus` that is
+  meter `S1 Speech To Text` at $1.00/audio-hour plus `S1 Speech to Text
+  Enhanced Feature Audio` at $0.30 (retail price API, checked Aug 2026; F0 is
+  free for 5 audio-hours/month). So `enable_prosody` is a 30% cost switch, not
+  a quality toggle — it is off for single-word drills (no rhythm to assess) and
+  off for the backfill (which merges nothing but `phones`/`pacc`, so the
+  prosody score would be charged for and dropped). Leave it on for a real
+  analysis, where the score is shown.
+- **Per-sound scores arrive on every new analysis; `backfill_phonemes.py` is
+  catch-up only.** The Azure request has always used `Granularity.Phoneme`, so
+  the scores were being returned and discarded — the fix was in the parser, on
+  the shared `azure_pronunciation()` that both the web route and the backfill
+  call. `apply_strictness()` preserves them because it shallow-copies each word
+  (`nw = dict(w)`); it re-grades the word verdict but *not* `pacc`, which is
+  right: the sound trend must not move when a per-recording UI toggle changes.
+  Pinned by tests, since a rebuild-the-word-dict refactor would silently break
+  both properties and the only symptom would be new recordings quietly
+  dropping to attributed mode.
+- **Both trends bucket by rolling windows anchored on today, never ISO weeks**
+  (`_windows`, `TREND_WINDOW_DAYS`). Two properties depend on it. The newest
+  point always has a full seven days behind it — a Monday-aligned bucket spends
+  most of Monday holding one day of speech, and that lone point swings hard
+  enough to read as a collapse. And because every window is the same length,
+  position on the axis *is* time, so `_windows` deliberately returns the empty
+  windows too: this library has a 24-day silence in July that the old ordinal
+  axis rendered as one tick's width. Pass `end=` in tests; the default is
+  `date.today()` and fixtures dated after it are dropped by design.
+- **Thin buckets are marked, not merged.** An earlier version pooled a thin week
+  into its neighbour. That cannot coexist with a uniform time axis — the thin
+  week here has three empty windows on each side, so "pool with the neighbour"
+  meant reaching across a month of silence and labelling the result one bucket,
+  which is how the silence got hidden in the first place. Both charts now use
+  the same two tiers: below `TREND_BUCKET_WORDS`/40 attempts the dot is hollow,
+  below `TREND_MIN_WORDS`/`TREND_MIN_WEEK` the point is dropped and returned in
+  `gaps` so the line can dot across it and the table can say which kind of
+  nothing it was.
+- **Only the lead-in is trimmed** (`_trim_lead`). Leading windows below the
+  thin threshold are cut so the chart opens on a readable point; the count goes
+  back as `trimmed` and the card states it. Interior gaps are deliberately kept
+  — trimming them would undo the uniform time axis the windows exist for. If no
+  window is solid yet, nothing is trimmed, so a new user does not get an empty
+  card.
+- **`_windows` returns a date→window map, so `len(index)` counts days, not
+  recordings.** Two recordings on one day share a key. Anything reporting a
+  recording count has to iterate the items.
+- **`_GRAMMAR_JS` is substituted with `%s`, not `%`-formatted** — so a literal
+  `%` inside it stays a single `%`. The opposite of `_PRON_WEEKLY_JS` and the
+  other panel templates, where `%` must be doubled. Getting this backwards
+  renders `100%%` into the page or blows up the whole panel with "not enough
+  arguments for format string".
+- **Error stats are rates, never counts** (Speaking error log → Error stats).
+  Azure returns an `AccuracyScore` per phoneme and the parser used to throw it
+  away; it is now kept as `pacc`, parallel to `phones`, with `-1` meaning "not
+  assessed" — do not conflate that with 0. Sounds are tagged by *position*
+  (`_stat_roles`), because dark l / final stops are the whole point. Two
+  evidence levels: **exact** (per-phoneme) and **attributed** (word-level
+  verdict charged to every sound in the word). The UI must keep saying which
+  one it is — an attributed number presented as exact is worse than no number.
+  Ranking uses a Wilson lower bound *plus* a 25-encounter floor: the interval
+  alone happily promotes 2-of-3, which is statistically fair and practically
+  useless advice.
 - **Transcript feeds analysis** → if the user provides a transcript, grammar
   analysis uses it directly (no re-run of Whisper). Whisper only runs when the
   transcript is blank. There's a **language selector** (default English) because

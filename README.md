@@ -39,7 +39,7 @@ this table — it's configuration, not training):
 | 📈 Summary & progress | average pronunciation score by week (speaking, reading passage, single word); improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
 | 🎯 Practice single word | say a word, get an instant Azure accuracy score — every attempt is logged so you can watch a specific word improve |
 | 📖 Reading | reread the polished version of one of your own past recordings, scored against it |
-| 📋 Speaking error log | grammar and word-choice mistakes aggregated across sessions |
+| 📋 Speaking error log | three tabs — the grammar log itself, **Grammar error by type stats**, and **Pronunciation error stats**; the two stats tabs show how often each sound and each type of mistake goes wrong, as a rate, and how that rate is moving week by week ([details](#error-rates-not-error-lists)) |
 | 🗣️ Speaking vocabulary | how much distinct vocabulary you actually produce, growth over time, and the words you're recycling |
 | 📣 How-to: tricky words | step-by-step articulation guides for problem sounds |
 
@@ -96,6 +96,12 @@ python english_coach_web.py
 
 Everything happens on one page. **➕ New Speaking Analysis** opens the capture workflow:
 
+- **🎲 Describe a random photo** pulls one of your own saved photos up next to the
+  record button, so a session never stalls on "what should I even say?". The
+  description the model wrote is deliberately **not** shown — this panel is for
+  producing language, and a description on screen turns the exercise into reading
+  aloud. Check yourself against it afterwards in *Describe a photo*; one click
+  opens that photo's review directly.
 - **Record in the browser** via `MediaRecorder`, or upload any audio/video file.
   A recording made in-page is handed to the upload field directly, so there's no
   save-then-attach step.
@@ -220,6 +226,11 @@ photo ──────> vision LLM (Kimi, falling back to Claude) ─┬─> c
   except `/login`), `/api/progress` — the server-side store that replaced
   browser-only localStorage — the saved-photo routes, the editable-prompt
   registry, and media pruning.
+- **`backfill_phonemes.py`** — re-assesses recordings analysed before Azure's
+  per-phoneme scores were kept, so the error log can move from *attributed* to
+  *exact*. Touches only `phones`/`pacc` inside `azure.words`, skips anything
+  already upgraded, and does nothing without `--run` because it spends Azure
+  quota.
 - **`transcribe_service.py`** — a standalone, reusable sherpa-onnx STT
   microservice (HTTP + WebSocket, self-describing `/api` spec). Mounted into the
   web app so live captions work in a single process, but runnable on its own.
@@ -237,6 +248,193 @@ photo ──────> vision LLM (Kimi, falling back to Claude) ─┬─> c
 | `mandarin_contrasts.json` | Mandarin-L1 specific pronunciation contrasts |
 | `daily_phrases.json` | high-frequency everyday phrases |
 | `Practice scripts/` | minimal-pair story texts for passage practice |
+
+## Azure usage
+
+**Azure has no API that reports remaining quota.** The Speech key can spend
+quota but cannot ask what is left. Consumption is visible only as an Azure
+Monitor metric on the Cognitive Services account —
+[`AudioSecondsTranscribed`](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-cognitiveservices-accounts-metrics)
+— which needs Azure AD credentials plus subscription and resource IDs, and even
+that reports what you *used*, never what remains. Nothing in the whole metric
+table exposes an allowance.
+
+So the app meters itself. Every call into `azure_pronunciation` measures the
+audio it is about to send and appends it to `VideoAudioFiles/azure_usage.json`.
+Because the metering sits inside that one function, it catches every consumer —
+speaking analysis, single-word practice, reading, and the phoneme backfill —
+and tags each with what spent it. On first read the ledger is seeded from the
+analyses already on disk, so history is not lost; those rows are marked
+`seeded` and the meter says *history estimated*, since a recording analysed
+twice only left one result behind.
+
+The New Speaking Analysis page then shows, beside the Azure checkbox:
+
+```
+1.31 h sent to Azure in 2026-08 (14 calls)
+3.69 h left of 5 h
+counted by this app · history estimated
+```
+
+Set your monthly allowance in **Setting Panel → Monthly audio allowance**. The
+free F0 tier is commonly 5 audio hours per month, but check the
+[pricing page](https://azure.microsoft.com/pricing/details/speech-services/)
+for your own tier. Setting it to **0** means pay-as-you-go: usage is still
+reported, and nothing is presented as a limit.
+
+The honest caveat, which the meter states on its own face: this counts what
+*this app* sent. Anything else using the same Azure key is invisible to it.
+
+## Error rates, not error lists
+
+A list of mistakes tells you what went wrong. It cannot tell you what to
+practise, because it has no denominator. "Seven bad θ" means one thing if you
+said θ nine times and something completely different if you said it three
+hundred. The two stats tabs on the Speaking error log are built around
+supplying that denominator.
+
+The panel has three tabs:
+
+| Tab | What it holds |
+|---|---|
+| 📋 Grammar error log | every logged mistake, grouped by rule, with **Mastered** to retire one. Logging a mistake by hand is a button here rather than a tab of its own |
+| 📊 Grammar error by type stats | mistakes per 1000 words over time, then the by-type table |
+| 🗣️ Pronunciation error stats | failure rate per sound over time, then the per-sound table |
+
+### Sounds
+
+Every word Azure scores is broken into phonemes — from Azure's own lexicon
+where it saved one, otherwise from CMUdict, which is what lets the report cover
+the whole library and not just recent recordings. Each phoneme is tagged with
+its position, because position is the difficulty: the /l/ in *light* and the
+/l/ in *feel* are different articulations, and it is the second one Mandarin
+has no equivalent for. Averaging them together hides exactly the problem you
+are looking for.
+
+Fourteen sound groups are tracked, each with a note on why it is hard for a
+Mandarin speaker — θ and ð, final stops, dark vs clear l, /r/, /ɜr/, /ŋ/, /v/,
+final s/z, final n, ʃ tʃ dʒ, iː vs ɪ, and /æ/.
+
+Each row reports how many times you attempted the sound, how many were weak,
+and the rate — **against your own average**, not an absolute scale. An 8%
+failure rate is good news at a baseline of 12% and bad news at 4%, so the bar
+is centred on your baseline and the tick marks where average sits.
+
+### Two levels of evidence, and the report says which
+
+| Mode | What it means |
+|---|---|
+| **exact** | Azure scored every phoneme individually, so a weak /r/ is counted where the /r/ actually is |
+| **attributed** | Only a word-level verdict survives, so every tracked sound inside a flagged word is charged for it |
+
+Attribution is honest but blunt: the *attempt* counts are exact, the *failure*
+counts are an upper bound, and a sound that keeps company with a genuinely bad
+one inherits blame it does not deserve. The view says so in plain language
+rather than presenting an inference as a measurement.
+
+Recordings analysed before per-phoneme scores were kept can be upgraded — the
+audio is still on disk, and nothing but the phoneme data is rewritten:
+
+```bash
+python3 backfill_phonemes.py              # what it would do, and the Azure cost
+python3 backfill_phonemes.py --run --limit 2
+```
+
+### Failure rate over time
+
+The table answers "what is wrong"; the chart above it answers "am I getting
+better". Weekly failure rate per sound, lower is better, with a dashed grey
+baseline for all tracked sounds together. Tick up to five sounds to follow.
+
+Two things stop it lying to you.
+
+**It never mixes measurement modes.** Exact per-phoneme scoring and word-level
+attribution give different numbers for identical speech — θ reads about 6%
+attributed and about 20% exact. A part-upgraded library charted naively would
+show a cliff exactly where the backfill stopped, and that cliff is a change in
+the instrument, not in the speaker. So only recordings measured the same way
+are plotted, exact preferred, and the card says how many were left out and how
+to bring them in.
+
+**Points are rolling seven-day windows, not calendar weeks.** Each one ends on
+the date shown and the newest ends today, so today's recording is already in
+the last point. With Monday-aligned buckets, every Monday starts a point
+holding a single day of speech — and that lone point swings hard enough to read
+as a sudden collapse. Every window is also the same length, so distance along
+the axis is time: a fortnight you did not record in shows up as space rather
+than being folded into the neighbouring tick.
+
+**The lead-in is trimmed.** A trend has to open somewhere the number means
+something, so leading windows too small to carry a rate are cut and the card
+says how many. Only the front: a thin or empty window with real data on both
+sides is kept, because a dip *between* two measurements is information about
+you, while a run of them before you started is just dead columns.
+
+**Thin weeks are visibly thin, and never silently missing.** Below 40 attempts
+the dot is drawn hollow: a rate off 24 attempts swings far more than one off
+1,000, and that swing is exactly what gets misread as "I got worse". Below 10
+the week is skipped altogether — at *n* attempts one slip moves the rate by
+100/*n* points, so past that the dot has stopped being a measurement.
+
+A skipped week is still accounted for. The line jumps it as a faint **dotted**
+segment rather than a solid one, so the join never claims a reading that was
+never taken, and the table says which kind of nothing it was — `— (3 attempts,
+too few)` versus `— (none)`. This matters most for genuinely rare sounds: θ
+turns up 14 times in an ordinary week where ð turns up 178, so a floor set by
+eye erases θ from a week you spoke perfectly normally, and a bare dash in the
+table reads as a broken chart. Hover any dot — or any gap — for the raw counts,
+or hit **show numbers** for the table.
+
+Colours come from the app's chart hues re-stepped into the dark-mode lightness
+band, because the originals sat ΔE 9.4 apart to normal vision — below the
+readable floor. The re-stepped set passes all six checks of the palette
+validator. A colour belongs to a sound while it is on screen, so switching one
+off never repaints the others.
+
+### Ranking
+
+Rows are ordered by the lower bound of a Wilson interval, so a sound with a lot
+of evidence outranks a lucky-looking one. That is not sufficient on its own: 2
+failures out of 3 attempts genuinely does imply a rate above 20%, and would
+otherwise top the report. A sound attempted fewer than 25 times is therefore
+shown with its real numbers but held out of the ranking and marked *too few to
+rank* — it is not a habit yet, and drilling it instead of the sound you get
+wrong 135 times a month is wasted practice.
+
+### What you say wrong
+
+The grammar findings are classified into types — verb tense, articles,
+plural/countability, prepositions, modals, word form, word order and the rest —
+by matching the analyser's own stated rule, falling back to what actually
+changed between what you said and the correction. An omitted article is caught
+that way even when the rule text never uses the word "article". Roughly one in
+seven lands in *Other*, which is left visible rather than forced into a bucket.
+
+Counts are deduplicated across sessions and reported **per 1000 words spoken**,
+since a raw count mostly measures how much you recorded that month.
+
+The chart above the table is the same idea over time: mistakes per 1000 words,
+dashed grey for all types together, tick a type to follow it. Deduplication
+here is **per recording**, not global: the same slip listed twice in one
+analysis is one mistake, but making it again next week is exactly what the
+chart exists to show.
+
+Points are the same rolling seven-day windows as the pronunciation chart, so
+the two read against each other. A window you barely spoke in gets the same
+two-tier treatment a rare sound does: under 1000 words it is drawn **hollow**
+(real, but one long recording can swing it), and under 200 it is not plotted at
+all and the line **dots** across it. The table then says which kind of nothing
+a dash was — `(60 words)` or `(none)`.
+
+This replaced an earlier scheme that pooled thin weeks into their neighbours.
+Pooling cannot coexist with a uniform time axis: the thin week here had three
+empty weeks on either side of it, so "pool with the neighbour" meant reaching
+across a month of silence and labelling the result as one bucket — which is
+precisely how a month of not recording got hidden.
+
+One softer caveat, stated on the card: these findings come from a language
+model, so changing the analyser or its strictness nudges the counts a little
+independently of your English. Read a steady slope, not a single step.
 
 ## Listening by dictation
 
@@ -439,6 +637,9 @@ a compile / HTML-parse / JS-parse pass plus driving the running app.
 ```bash
 python test_dictation.py     # 38 checks — word-level alignment and grading
 python test_json_repair.py   # 22 checks — the LLM JSON repair chain
+python test_error_stats.py   # 88 checks — error rates, the two ways of counting them, both weekly trends
+python test_azure_usage.py   # 15 checks — the self-metered Azure usage ledger
+python test_word_ipa.py      # 12 checks — the IPA shown beside a practice word
 ```
 
 ## License

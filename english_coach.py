@@ -30,8 +30,10 @@ Dependencies for real analysis (not needed for --demo):
 
 import argparse
 import base64
+import glob
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -1168,8 +1170,134 @@ def apply_strictness(az, level="strict"):
     return out
 
 
+# --- Azure usage metering ---------------------------------------------------
+# Azure has no "remaining quota" endpoint. The Speech key can spend quota but
+# cannot ask what is left: usage is only visible as an Azure Monitor metric
+# (`AudioSecondsTranscribed` on the Cognitive Services account), which needs
+# Azure AD credentials and the subscription/resource IDs — none of which this
+# app has or should have.
+#
+# But the app knows exactly what it sent, because it is the thing sending it.
+# So it meters itself: every call appends the measured audio length here, and
+# "remaining" is that subtracted from whatever monthly allowance you set. This
+# is authoritative for this app and blind to anything else on the same key —
+# which is the honest trade, and the reason the UI says "sent by this app".
+
+USAGE_FILE = "azure_usage.json"
+
+
+def _wav_seconds(path):
+    """Length of a PCM wav, in seconds. 0 if it cannot be read."""
+    import wave
+    try:
+        with wave.open(path, "rb") as w:
+            rate = w.getframerate() or 0
+            return round(w.getnframes() / rate, 2) if rate else 0.0
+    except Exception:                                  # noqa: BLE001
+        return 0.0
+
+
+def usage_path(library=None):
+    return os.path.join(library or library_dir(), USAGE_FILE)
+
+
+def _seed_usage(library=None):
+    """Reconstruct past usage from the analyses on disk, once.
+
+    Only an approximation of history: a recording re-analysed twice is counted
+    once, and single-word drills left no duration behind at all. Marked
+    `seeded` so the summary can say so instead of implying it was measured.
+    """
+    rows = []
+    for p in sorted(glob.glob(os.path.join(library or library_dir(), "**",
+                                           "*.result.json"), recursive=True)):
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:                              # noqa: BLE001
+            continue
+        if not ((d.get("azure") or {}).get("words")):
+            continue                                   # Azure never ran on it
+        sec = d.get("duration_sec") or 0
+        if sec:
+            rows.append({"t": d.get("recorded_at") or d.get("date") or "",
+                         "sec": round(float(sec), 2), "kind": "analysis",
+                         "seeded": True})
+    return rows
+
+
+def read_azure_usage(library=None):
+    """The whole ledger, seeding it from disk the first time it is asked for."""
+    p = usage_path(library)
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except FileNotFoundError:
+        rows = _seed_usage(library)
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(rows, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+        return rows
+    except Exception:                                  # noqa: BLE001
+        pass
+    return []
+
+
+def log_azure_usage(seconds, kind="analysis", library=None):
+    """Append one Azure call. Never raises — metering must not break scoring."""
+    try:
+        seconds = float(seconds or 0)
+        if seconds <= 0:
+            return
+        rows = read_azure_usage(library)
+        rows.append({"t": datetime.now().isoformat(timespec="seconds"),
+                     "sec": round(seconds, 2), "kind": kind})
+        p = usage_path(library)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, p)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+
+def azure_usage_summary(library=None, allowance_hours=0, month=None):
+    """This month's Azure audio, against whatever allowance you have.
+
+    `allowance_hours` of 0 means "no cap set" — pay-as-you-go, or simply not
+    configured. The summary then reports usage and stays quiet about what is
+    left, rather than inventing a limit.
+    """
+    rows = read_azure_usage(library)
+    month = month or date.today().strftime("%Y-%m")
+    sec, by_kind, seeded = 0.0, {}, False
+    for r in rows:
+        if not str(r.get("t", "")).startswith(month):
+            continue
+        s = float(r.get("sec") or 0)
+        sec += s
+        k = r.get("kind") or "analysis"
+        by_kind[k] = round(by_kind.get(k, 0) + s, 1)
+        seeded = seeded or bool(r.get("seeded"))
+    hours = sec / 3600.0
+    out = {"month": month, "seconds": round(sec, 1), "hours": round(hours, 2),
+           "by_kind": by_kind, "seeded": seeded, "calls":
+           sum(1 for r in rows if str(r.get("t", "")).startswith(month)),
+           "allowance_hours": allowance_hours or 0}
+    if allowance_hours:
+        out["remaining_hours"] = round(max(0.0, allowance_hours - hours), 2)
+        out["pct"] = round(min(100.0, 100.0 * hours / allowance_hours), 1)
+    return out
+
+
 def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
-                        enable_prosody=True, enable_miscue=True, locale="en-US"):
+                        enable_prosody=True, enable_miscue=True, locale="en-US",
+                        usage_kind="analysis"):
     """Score a recording against the script the user read aloud.
 
     Returns a dict with overall + breakdown scores, per-word error list, and
@@ -1200,6 +1328,10 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
     key = os.environ["AZURE_SPEECH_KEY"]
     region = os.environ["AZURE_SPEECH_REGION"]
     wav = _to_wav_16k_mono(audio_path)
+    # Metered here rather than at each call site: Azure bills the audio it is
+    # sent, and this is the one place every caller — analysis, single-word
+    # practice, reading, the phoneme backfill — passes through.
+    log_azure_usage(_wav_seconds(wav), kind=usage_kind)
 
     speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
     audio_config = speechsdk.audio.AudioConfig(filename=wav)
@@ -1293,16 +1425,31 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
                 # is occasionally just wrong (it expects "tied" as /t iy d/,
                 # "teed"), and without this there is no way to tell a genuine
                 # mispronunciation from being marked against the wrong target.
-                phones = []
+                #
+                # Each phoneme also carries its OWN accuracy score, kept here in
+                # `pacc` (same length and order as `phones`). Without it the
+                # error log can only say "this word scored 62" and guess which
+                # sound sank it; with it, "you produced /r/ 1227 times and 123
+                # of them were weak" is a count rather than an inference.
+                phones, pacc = [], []
                 if i < len(json_words):
-                    phones = [p.get("Phoneme") for p in
-                              (json_words[i].get("Phonemes") or []) if p.get("Phoneme")]
+                    for p in (json_words[i].get("Phonemes") or []):
+                        sym = p.get("Phoneme")
+                        if not sym:
+                            continue
+                        phones.append(sym)
+                        ps = _num((p.get("PronunciationAssessment") or {})
+                                  .get("AccuracyScore"))
+                        # -1, not 0: "Azure did not score this" and "you scored
+                        # zero" mean opposite things to the stats that read it.
+                        pacc.append(-1 if ps is None else max(0, min(100, round(ps))))
                 words.append({
                     "word": w.word,
                     "accuracy": 0 if wa is None else max(0, min(100, round(wa))),
                     "error": w.error_type if w.error_type != "None" else "",
                     "t": start,   # start time in seconds, for click-to-play
                     "phones": phones,
+                    "pacc": pacc,
                 })
         except Exception as e:
             skipped.append("words: %s" % str(e)[:100])
@@ -1866,6 +2013,24 @@ _DASHBOARD_CSS = """
   .words{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .wpill{font-size:13px;padding:3px 8px;border-radius:6px;background:#1f3542;color:var(--mut)}
   .wpill.bad{background:#3a2029;color:var(--bad)}
+  /* Error-stats rows. The bar is deliberately relative to YOUR average, not to
+     a fixed 0-100 -- an 8% failure rate means nothing until you know whether
+     your own baseline is 3% or 20%. The tick marks where average sits. */
+  .es{display:grid;grid-template-columns:minmax(190px,1.4fr) auto minmax(110px,1fr);
+      gap:10px 14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .es:last-child{border-bottom:0}
+  .es.thin{opacity:.55}
+  .es-n{font-size:13px;color:var(--mut);white-space:nowrap;text-align:right}
+  .es-n b{color:var(--ink);font-weight:700}
+  .lb{position:relative;height:9px;background:var(--line);border-radius:6px}
+  .lb i{display:block;height:100%;border-radius:6px;background:var(--good)}
+  .lb.warn i{background:var(--warn)} .lb.bad i{background:var(--bad)}
+  .lb u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--mut);opacity:.65}
+  .es-x{font-size:12px;color:var(--mut);margin-top:3px;display:block}
+  .esnote{grid-column:1/-1;margin:-2px 0 2px;font-size:12.5px;color:var(--mut)}
+  .esbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;
+           border-radius:999px;background:#1f3542;color:var(--mut);margin-left:8px}
+  .esbadge.exact{background:rgba(67,197,158,.18);color:var(--good)}
   .errgrid{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 4px}
   .errc{display:flex;align-items:center;gap:8px;background:#1f3542;
         padding:6px 12px 6px 6px;border-radius:10px;font-size:14px;color:var(--ink)}
@@ -2617,10 +2782,19 @@ window.SkillStore=(function(){
    });
  }
  function get(k,d){ var v=CACHE&&CACHE[k]; return (v===undefined||v===null)?d:v; }
+ // Keys written but not yet acknowledged by the server. update() re-reads the
+ // whole store before mutating, and that read can be answered before an earlier
+ // POST has been applied — which would silently undo it. Two clicks in quick
+ // succession is enough. Anything in flight is re-applied over the server's
+ // answer and dropped once the write is confirmed.
+ var PENDING={};
  function set(k,v,replace){ CACHE=CACHE||{}; CACHE[k]=v;
    var body={}; body[k]=v;
    if(replace) body.__replace=[k];   // "delete this", not "here's my snapshot"
-   try{ fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(function(){}); }catch(_){}
+   PENDING[k]=v;
+   try{ fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+     .then(function(r){ if(r&&r.ok&&PENDING[k]===v) delete PENDING[k]; })
+     .catch(function(){}); }catch(_){}
  }
  // Read-modify-write on a key that the server can only replace wholesale
  // (pw_custom, pw_hidden, …). CACHE is hydrated once at page load, so a tab
@@ -2631,7 +2805,11 @@ window.SkillStore=(function(){
  // old copy of an edited entry alongside the new one, and resurrect deletions.
  function update(k,d,fn,replace){
    var fresh=_xhrRetry('GET','/api/progress');
-   if(fresh){ CACHE=fresh; }
+   if(fresh){
+     CACHE=fresh;
+     // our own in-flight writes outrank a server read that may predate them
+     Object.keys(PENDING).forEach(function(pk){ CACHE[pk]=PENDING[pk]; });
+   }
    var cur=get(k,d);
    set(k, fn(cur), replace);
  }
@@ -2910,16 +3088,26 @@ _VOCAB_JS = (r"""
  // Photo words that you've already added to the deck appear once, as captured —
  // the deck copy wins, because that's the one with the review schedule on it.
  function photos(){ return S.get('ec_photos',[]); }
+ // A photo word can be dismissed from this list — a vision model picks out
+ // things you already know, or splits one object into three near-duplicates.
+ // It's hidden rather than cut out of the photo's own record, because that
+ // record is what "Describe a photo" compares your recall against. Coverage is
+ // unaffected either way: it reads the ledger, which never forgets.
+ function hiddenSet(){
+   var h={}; (S.get('lex_hidden',[])||[]).forEach(function(w){ h[w]=1; }); return h;
+ }
+ function setHidden(fn){ S.update('lex_hidden',[],fn,true); }
  function merged(){
    var out=items().map(function(x){
      return {id:x.id, headword:x.headword, definition:x.definition, example:x.example||'',
              type:x.type||'other', scenario:x.scenario||'General', src:'deck', srs:x.srs};
    });
-   var have={}; out.forEach(function(x){ have[(x.headword||'').toLowerCase()]=1; });
+   var have={}, hid=hiddenSet();
+   out.forEach(function(x){ have[(x.headword||'').toLowerCase()]=1; });
    photos().forEach(function(p){
      (p.items||[]).forEach(function(it){
        var k=(it.headword||'').toLowerCase();
-       if(!k || have[k]) return;
+       if(!k || have[k] || hid[k]) return;
        have[k]=1;
        out.push({id:null, headword:it.headword, definition:it.definition||'',
                  example:it.example||'', type:it.type||'single_word',
@@ -2936,9 +3124,20 @@ _VOCAB_JS = (r"""
          "('"+String(o.k).replace(/'/g,"\\'")+"')\">"+S.esc(o.label)+
          " <span class='hint'>"+o.n+"</span></button>"; }).join('')+"</div>";
  }
+ function hideBar(){
+   var hid=S.get('lex_hidden',[])||[];
+   if(!hid.length) return "";
+   return "<div class='bsfilter'><span class='hint'>"+hid.length+" photo word"+
+     (hid.length===1?"":"s")+" removed from this list — still counted in Coverage</span> "+
+     "<button class='btn small' onclick='VX.showHidden(this)'>👁 Show</button> "+
+     "<button class='btn small' onclick='VX.unhideAll()'>↺ Restore all</button>"+
+     "<div id='vx-hidden' style='display:none;margin-top:8px'>"+hid.map(function(w){
+       return "<button class='btn small' title='Put it back' onclick=\"VX.unhide('"+
+         encodeURIComponent(w)+"')\">"+S.esc(w)+" ↺</button> "; }).join('')+"</div></div>";
+ }
  function all(){
    var full=merged();
-   if(!full.length){ body().innerHTML="<div class='card'>No words yet. Hit <b>Capture</b> to add "+
+   if(!full.length){ body().innerHTML=hideBar()+"<div class='card'>No words yet. Hit <b>Capture</b> to add "+
      "one by hand, or save a photo in <b>Describe a photo</b> and its words land here.</div>"; return; }
    // No source breakdown up here: where a word came from is already on its own
    // row, in the From column, where it's actually useful.
@@ -2950,7 +3149,7 @@ _VOCAB_JS = (r"""
        present.map(function(s){return {k:s,label:s,n:scount[s]};})), SCFILTER,'filterScenario') : "";
 
    var a=SCFILTER==='all'?full:full.filter(function(x){return x.scenario===SCFILTER;});
-   if(!a.length){ body().innerHTML=scBar+"<div class='card'>Nothing matches that filter.</div>"; return; }
+   if(!a.length){ body().innerHTML=hideBar()+scBar+"<div class='card'>Nothing matches that filter.</div>"; return; }
    a.sort(function(x,y){ return x.headword.toLowerCase()<y.headword.toLowerCase()?-1:1; });
    var by={}; a.forEach(function(x){(by[x.type||'other']=by[x.type||'other']||[]).push(x);});
    var h='';
@@ -2965,19 +3164,53 @@ _VOCAB_JS = (r"""
            : "<span class='hint'>"+(x.srs?'reviewing':'captured')+"</span>";
          var act = x.src==='photo'
            ? "<button class='btn small' title='Add to your review deck' onclick=\"VX.toDeck('"+
-             encodeURIComponent(x.headword)+"')\">➕</button>"
+             encodeURIComponent(x.headword)+"')\">➕</button> "+
+             "<button class='btn small' style='background:#3a2029;color:#ff9db0' "+
+             "title='Remove from this list — the photo and the Coverage report keep it' "+
+             "onclick=\"VX.hide('"+encodeURIComponent(x.headword)+"')\">&#10005;</button>"
            : "<button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button>";
          return "<tr><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
            "</td><td class='hint'>"+S.esc(x.example||'')+"</td><td>"+from+
-           "</td><td style='text-align:right'>"+act+"</td></tr>"; }).join('')+"</table>";
+           "</td><td style='text-align:right;white-space:nowrap'>"+act+"</td></tr>"; }).join('')+"</table>";
    });
-   body().innerHTML=scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
+   body().innerHTML=hideBar()+scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
  window.VX={ flip:function(){var b=body().querySelector('.vxback'); if(b)b.style.display='block';},
    add:function(){var h=document.getElementById('vx-h').value.trim(); if(!h){document.getElementById('vx-msg').textContent='Headword required';return;}
      var it={id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,added:S.today(),srs:null};
      var a=items(); a.push(it); save(a); recordCaptured([it]);
      document.getElementById('vx-msg').textContent='Saved ✓'; ['vx-h','vx-d','vx-e'].forEach(function(i){document.getElementById(i).value='';}); },
-   del:function(id){ save(items().filter(function(x){return x.id!==id;})); all(); },
+   // Deleting a captured word that a photo ALSO produced would otherwise just
+   // unmask the photo copy and the row would appear not to go away, so the
+   // dismissal has to cover both sources.
+   del:function(id){
+     var it=items().filter(function(x){return x.id===id;})[0];
+     var hw=it?(it.headword||'').toLowerCase():'';
+     var inPhoto=hw && photos().some(function(p){
+       return (p.items||[]).some(function(i){ return (i.headword||'').toLowerCase()===hw; }); });
+     // hide BEFORE the deck write: setHidden re-reads the whole store, so doing
+     // it second would restore the entry we just removed here
+     if(inPhoto) setHidden(function(cur){ cur=cur||[];
+       return cur.indexOf(hw)<0 ? cur.concat([hw]) : cur; });
+     save(items().filter(function(x){return x.id!==id;}));
+     all();
+   },
+   hide:function(hw){
+     hw=decodeURIComponent(hw).toLowerCase();
+     setHidden(function(cur){ cur=cur||[];
+       return cur.indexOf(hw)<0 ? cur.concat([hw]) : cur; });
+     all();
+   },
+   unhide:function(hw){
+     hw=decodeURIComponent(hw).toLowerCase();
+     setHidden(function(cur){ return (cur||[]).filter(function(w){ return w!==hw; }); });
+     all();
+   },
+   unhideAll:function(){ setHidden(function(){ return []; }); all(); },
+   showHidden:function(btn){
+     var d=document.getElementById('vx-hidden'); if(!d) return;
+     var on=d.style.display==='none';
+     d.style.display=on?'block':'none'; btn.textContent=on?'👁 Hide':'👁 Show';
+   },
    filterScenario:function(s){ SCFILTER=s; all(); },
    openPhoto:function(pid){
      var a=document.querySelector("a[data-panel=photodesc]"); if(a) a.click();
@@ -3033,33 +3266,368 @@ _GRAMMAR_JS = r"""
  function recs(){return window.GRAMMAR_DATA||[];} function manual(){return S.get('gram_log',[]);}
  function seed(){return window.GRAMMAR_SEED||[];}
  function body(){return document.getElementById('gx-body');}
- function render(){ MODE==='add'?addForm():log(); }
+ function render(){ if(MODE==='gstats')return gstats(); if(MODE==='pstats')return pstats(); log(); }
+
+ // ---- error stats -------------------------------------------------------
+ // Everything here is a rate, never a bare count: "37 weak /r/" is unreadable
+ // without "out of 1286 times you said one".
+ function bar(lift){
+   var MAX=2.5, w=Math.max(2,Math.min(100, lift/MAX*100));
+   var cls = lift>=1.5?' bad' : (lift>=1.05?' warn':'');
+   return "<div class='lb"+cls+"'><i style='width:"+w.toFixed(0)+"%'></i>"+
+          "<u style='left:"+(100/MAX).toFixed(0)+"%' title='your average'></u></div>";
+ }
+ function soundRows(p){
+   return (p.rows||[]).map(function(r){
+     return "<div class='es"+(r.thin?" thin":"")+"'><div><b>"+S.esc(r.label)+"</b>"+
+       (r.exact?"<span class='esbadge exact'>exact</span>":"")+
+       (r.thin?"<span class='esbadge'>too few to rank</span>":"")+"</div>"+
+       "<div class='es-n'>said <b>"+r.n+"</b>× · weak <b>"+r.bad+"</b> · <b>"+r.rate+"%</b></div>"+
+       "<div>"+bar(r.lift)+"<span class='es-x'>"+r.lift.toFixed(2)+
+         "× your average"+(!r.thin&&r.lift_lo>=1.15?" · clearly worse":"")+"</span></div>"+
+       "<div class='esnote'>"+S.esc(r.note)+
+         (r.examples&&r.examples.length? " <span class='words' style='display:inline-flex'>"+
+           r.examples.map(function(w){return "<span class='wpill bad'>"+S.esc(w)+"</span>";}).join('')+
+           "</span>":"")+"</div></div>";
+   }).join('');
+ }
+ // ---- the trend charts --------------------------------------------------
+ // One chart engine, two datasets. The only real differences are the unit and
+ // what counts as a thin week, so those are the only things configured.
+ var CH={
+   pron:{ host:'gx-trend', overall:'All tracked sounds',
+          data:function(){ return window.ERRSTATS.trend||{}; },
+          ylab:function(v){ return v+'%'; },
+          tip:function(p){ return p.rate+'% weak ('+p.bad+' of '+p.n+' attempts)'; },
+          cell:function(p){ return p.rate+'% <span class="hint">('+p.n+')</span>'; },
+          thin:function(p){ return p.n<40; },
+          gap:function(n){ return n? ' — only '+n+' attempts' : ' — never came up'; },
+          unit:'attempts',
+          foot:'A <b>hollow</b> dot is a window with fewer than 40 attempts of that '+
+               'sound — the rate is real but jumpy, so read the shape, not the step. '+
+               'A <b>dotted</b> segment jumps a window too thin to score at all: it is '+
+               'joined so the line stays followable, not because anything was measured '+
+               'there. Hover any dot — or any gap — for the counts.' },
+   gram:{ host:'gx-gtrend', overall:'All mistake types',
+          data:function(){ return window.ERRSTATS.gtrend||{}; },
+          ylab:function(v){ return v; },
+          tip:function(p){ return p.rate+' per 1k words ('+p.n+' in '+p.words+' words)'; },
+          cell:function(p){ return p.rate+' <span class="hint">('+p.n+')</span>'; },
+          thin:function(p){ return !!p.thin; },
+          gap:function(n){ return n? ' — only '+n+' words spoken' : ' — nothing recorded'; },
+          unit:'words',
+          foot:'Counts are per <b>1000 words spoken</b>, so a heavy week does not look '+
+               'like a bad one. A <b>hollow</b> dot is a window with under 1000 words '+
+               'behind it — real, but one long recording can swing it. A <b>dotted</b> '+
+               'segment jumps a stretch you barely recorded in; the line is joined so '+
+               'it stays followable, not because anything was measured there. Hover any '+
+               'dot — or any gap — for the raw numbers.' }
+ };
+ var CHS={};                            // chart id -> {sel, slot, nums}
+ function chs(id){ return CHS[id]||(CHS[id]={sel:{},slot:{},nums:false}); }
+ function tcolors(id){ return CH[id].data().colors||[]; }
+ function tpick(id,k){
+   var st=chs(id), TSLOT=st.slot;
+   // A colour belongs to a sound for as long as it is on screen. Handing them
+   // out by rank instead would recolour every surviving line whenever one is
+   // switched off, and a line that changes colour reads as a different line.
+   if(TSLOT[k]!=null) return;
+   var used={}; Object.keys(TSLOT).forEach(function(x){ used[TSLOT[x]]=1; });
+   for(var i=0;i<tcolors(id).length;i++){ if(!used[i]){ TSLOT[k]=i; return; } }
+ }
+ window.GXT={
+   toggle:function(id,k){
+     var st=chs(id);
+     if(st.sel[k]){ delete st.sel[k]; delete st.slot[k]; }
+     else{
+       if(Object.keys(st.sel).length>=tcolors(id).length) return;   // out of hues
+       st.sel[k]=1; tpick(id,k);
+     }
+     drawChart(id);
+   },
+   nums:function(id){ chs(id).nums=!chs(id).nums; drawChart(id); }
+ };
+ function drawChart(id){
+   var cfg=CH[id], st=chs(id), TSEL=st.sel, TSLOT=st.slot, TNUM=st.nums;
+   var host=document.getElementById(cfg.host); if(!host) return;
+   var T=cfg.data(), C=tcolors(id);
+   var weeks=T.weeks||[], lines=[];
+   if(T.overall && T.overall.length>1)
+     lines.push({key:'', label:cfg.overall, short:'All', color:'#9aa3bf',
+                 dash:'5 4', points:T.overall});
+   (T.series||[]).forEach(function(s){
+     if(TSEL[s.key]) lines.push({key:s.key, label:s.label, color:C[TSLOT[s.key]],
+                                 short:s.label.split(' —')[0].split(' vs')[0]
+                                        .split(' (')[0].split(' /')[0],
+                                 dash:'', gaps:s.gaps||{}, points:s.points});
+   });
+
+   var W=920,H=300,L=46,R=118,Tp=18,B=46, iw=W-L-R, ih=H-Tp-B;
+   var hi=0; lines.forEach(function(s){ s.points.forEach(function(p){ if(p.rate>hi) hi=p.rate; }); });
+   var top=Math.max(10, Math.ceil(hi/5)*5+5);      // a rate starts at 0, always
+   function y(v){ return Tp+ih*(1-v/top); }
+   function x(w){ var i=weeks.indexOf(w);
+     return L+(weeks.length<2?iw/2:iw*i/(weeks.length-1)); }
+   function mon(ds){ var p=ds.split('-');
+     return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]+' '+(+p[2]); }
+   // A bucket may cover more than one week. Name the span, so a pooled point
+   // never passes for a single week that happened to be unusually busy.
+   var WEND=T.wend||{};
+   function bmon(w){
+     var e=WEND[w]; if(!e||e===w) return mon(w);
+     // "Aug 3 – 9" inside one month, "Jul 27 – Aug 2" across one. Repeating the
+     // month on every tick costs width the axis does not have.
+     return mon(w)+' – '+(w.slice(0,7)===e.slice(0,7) ? String(+e.slice(8)) : mon(e));
+   }
+
+   // Round tick values, whatever the unit. Dividing the range by five gives
+   // steps like 8 and 0.9; readers want 10 and 1.
+   function nice(v){
+     var p=Math.pow(10, Math.floor(Math.log(v)/Math.LN10)), n=v/p;
+     return (n<=1?1 : n<=2?2 : n<=2.5?2.5 : n<=5?5 : 10)*p;
+   }
+   var grid='', step=nice(top/5);
+   for(var v=0; v<=top+0.001; v+=step)
+     grid+="<line x1='"+L+"' y1='"+y(v).toFixed(1)+"' x2='"+(W-R)+"' y2='"+y(v).toFixed(1)+
+           "' stroke='#24404c'/><text x='"+(L-8)+"' y='"+(y(v)+4).toFixed(1)+
+           "' fill='#9aa3bf' font-size='11' text-anchor='end'>"+
+           cfg.ylab(Math.round(v*100)/100)+"</text>";
+   weeks.forEach(function(w){
+     grid+="<text x='"+x(w).toFixed(1)+"' y='"+(H-16)+"' fill='#9aa3bf' font-size='11' "+
+           "text-anchor='middle'>"+bmon(w)+"</text>";
+   });
+
+   var body='', legend='', ends=[];
+   lines.forEach(function(s){
+     var pts=s.points.map(function(p){ return [x(p.w), y(p.rate), p]; });
+     // Segment by segment, not one polyline, so a jumped week can look
+     // different from a measured one. Joining a gap with the same solid stroke
+     // claims a reading that was never taken.
+     for(var i=1;i<pts.length;i++){
+       var a=pts[i-1], b=pts[i],
+           skip=(weeks.indexOf(b[2].w)-weeks.indexOf(a[2].w))>1;
+       body+="<line x1='"+a[0].toFixed(1)+"' y1='"+a[1].toFixed(1)+"' x2='"+
+             b[0].toFixed(1)+"' y2='"+b[1].toFixed(1)+"' stroke='"+s.color+
+             "' stroke-width='2'"+(skip?" stroke-dasharray='1 5' stroke-opacity='.55'":
+             (s.dash?" stroke-dasharray='"+s.dash+"'":""))+"/>";
+       if(skip){
+         // name the missing week where the eye already is, mid-gap
+         var g=[], j;
+         for(j=weeks.indexOf(a[2].w)+1;j<weeks.indexOf(b[2].w);j++)
+           g.push(bmon(weeks[j])+cfg.gap(s.gaps&&s.gaps[weeks[j]]));
+         body+="<circle cx='"+((a[0]+b[0])/2).toFixed(1)+"' cy='"+((a[1]+b[1])/2).toFixed(1)+
+               "' r='14' fill='transparent'><title>"+S.esc(s.label)+
+               " — not measured\n"+S.esc(g.join('\n'))+"</title></circle>";
+       }
+     }
+     pts.forEach(function(q){
+       // Hollow when the week is thin. A rate off 24 attempts and one off 1000
+       // are the same dot otherwise, and the thin one swings far more — which
+       // is exactly the swing somebody reads as "I got worse".
+       var thin=cfg.thin(q[2]);
+       body+="<circle cx='"+q[0].toFixed(1)+"' cy='"+q[1].toFixed(1)+"' r='4.5' fill='"+
+             (thin?'#172530':s.color)+"' stroke='"+(thin?s.color:'#172530')+"' stroke-width='2'/>"+
+             // the visible dot stays small; the hit target does not
+             "<circle cx='"+q[0].toFixed(1)+"' cy='"+q[1].toFixed(1)+"' r='12' fill='transparent'>"+
+             "<title>"+S.esc(s.label)+" — "+(q[2].span>1?"":"week of ")+bmon(q[2].w)+
+             (q[2].span>1?"  ("+q[2].span+" weeks pooled)":"")+"\n"+cfg.tip(q[2])+
+             (thin?"\nthin week — read this point loosely":"")+"</title></circle>";
+     });
+     // direct label at the right edge, so identity is never colour alone.
+     // Collected first, drawn after: two series ending on the same value would
+     // otherwise print on top of each other.
+     var last=pts[pts.length-1];
+     if(last) ends.push({x:last[0]+10, y:last[1]+4, c:s.color, t:s.short});
+     legend+="<span class='lg'><i style='background:"+s.color+"'></i>"+S.esc(s.label)+"</span>";
+   });
+   // Spread the end labels apart, then keep the whole stack inside the plot.
+   // Pushing down alone walks the last label off the bottom and straight over
+   // the date ticks, which is what four ticked series used to do.
+   ends.sort(function(a,b){ return a.y-b.y; });
+   var GAPY=14, lo=Tp+10, hi=Tp+ih;
+   for(var e=1;e<ends.length;e++)
+     if(ends[e].y-ends[e-1].y < GAPY) ends[e].y = ends[e-1].y + GAPY;
+   var over = ends.length ? ends[ends.length-1].y - hi : 0;
+   if(over > 0){
+     for(var f=0;f<ends.length;f++) ends[f].y -= over;
+     // shifting up can re-collide at the top; walk back down from the ceiling
+     for(var g=0;g<ends.length;g++)
+       if(ends[g].y < (g?ends[g-1].y+GAPY:lo)) ends[g].y = g?ends[g-1].y+GAPY:lo;
+   }
+   ends.forEach(function(e){
+     body+="<text x='"+e.x.toFixed(1)+"' y='"+e.y.toFixed(1)+"' fill='"+e.c+
+           "' font-size='11.5' font-weight='700'>"+S.esc(e.t)+"</text>";
+   });
+
+   var pills=(T.series||[]).map(function(s){
+     var on=!!TSEL[s.key];
+     return "<button class='btn small' onclick=\"GXT.toggle('"+id+"','"+s.key+"')\" style='"+
+       (on?"background:"+C[TSLOT[s.key]]+";color:#0d1620":"background:#1f3542;color:var(--mut)")+
+       "'>"+(on?"✓ ":"")+S.esc(s.label.split(' —')[0])+"</button>";
+   }).join(' ');
+
+   var table='';
+   if(TNUM){
+     table="<div style='overflow-x:auto;margin-top:12px'>"+
+       "<table style='min-width:520px'><tr><th>"+(id==='pron'?'Sound':'Type')+"</th>"+
+       weeks.map(function(w){return "<th>"+bmon(w)+"</th>";}).join('')+"</tr>"+
+       lines.map(function(s){
+         var by={}; s.points.forEach(function(p){ by[p.w]=p; });
+         return "<tr><td>"+S.esc(s.label)+"</td>"+weeks.map(function(w){
+           if(by[w]) return "<td>"+cfg.cell(by[w])+"</td>";
+           // A bare dash reads as a bug. Say which kind of nothing it is.
+           var n=s.gaps&&s.gaps[w];
+           // Terse here on purpose: this cell repeats across every row and
+           // every window, and the hover text carries the full sentence.
+           return "<td style='color:var(--mut)'>— <span class='hint'>"+
+                  (n? "("+n+" "+cfg.unit+")" : "(none)")+"</span></td>";
+         }).join('')+"</tr>";
+       }).join('')+"</table></div>";
+   }
+
+   host.innerHTML =
+     "<div class='chips' style='margin:2px 0 10px'>"+pills+
+       "<button class='btn small' onclick=\"GXT.nums('"+id+"')\" style='background:#1f3542;color:var(--mut)'>"+
+       (TNUM?"hide numbers":"show numbers")+"</button></div>"+
+     "<svg viewBox='0 0 "+W+" "+H+"' width='100%' style='max-width:"+W+"px'>"+grid+body+"</svg>"+
+     "<div class='legend'>"+legend+"</div>"+
+     "<p class='hint' style='margin:6px 0 0'>"+cfg.foot+"</p>"+table;
+ }
+
+ // The chart says nothing until something is on it, so open on the worst few.
+ function seed3(id){
+   var st=chs(id);
+   if(Object.keys(st.sel).length) return;
+   (CH[id].data().series||[]).slice(0,3).forEach(function(s){
+     st.sel[s.key]=1; tpick(id,s.key);
+   });
+ }
+ // A trimmed window is stated, never silently dropped: the chart is starting
+ // later than your history does, and that is the reader's business.
+ function trimNote(T){
+   var n=T.trimmed||0; if(!n) return '';
+   return " The chart starts at your first window with enough speech to carry a "+
+     "rate; <b>"+n+"</b> earlier "+(n>1?"windows are":"window is")+" left out.";
+ }
+ function trendCard(id, title, intro, note){
+   var T=CH[id].data(), n=(T.weeks||[]).length;
+   if(n<2) return "<div class='card'><b>"+title+"</b><p class='hint' style='margin:6px 0 0'>"+
+     "Needs at least two weeks of recordings — there "+(n?"is 1 so far":"are none yet")+
+     ". Keep recording and this fills in.</p></div>";
+   return "<div class='card'><b>"+title+"</b>"+
+     "<p class='hint' style='margin:6px 0 2px'>"+intro+"</p>"+
+     (note?"<p class='hint' style='margin:2px 0 8px'>"+note+"</p>":"")+
+     "<div id='"+CH[id].host+"'></div></div>";
+ }
+
+ function pstats(){
+   var D=window.ERRSTATS||{}, p=D.pron||{};
+   if(!p.rows||!p.rows.length){ body().innerHTML="<div class='card'>No scored recordings yet — "+
+     "run an analysis with Azure pronunciation scoring switched on.</div>"; return; }
+
+   // Say plainly how the failures were counted. An attributed number that
+   // looks exact is worse than no number.
+   var honest = (p.mode==='exact')
+     ? "<b>Exact.</b> Azure scored every sound individually, so a weak /r/ is counted where the /r/ actually is."
+     : ((p.mode==='mixed')
+        ? "<b>Partly exact.</b> "+p.exact_words+" of "+p.words+" words have per-sound scores; the rest are counted at word level (below)."
+        : "<b>Counted at word level.</b> These recordings kept only Azure's verdict per <i>word</i>, so every tracked sound inside a word it flagged is charged for it. "+
+          "The <i>said N×</i> counts are exact; the failure counts are an upper bound, and a sound sharing words with a genuinely bad one inherits blame. "+
+          "Compare the ratios, not the raw rates.");
+
+   var T=D.trend||{};
+   body().innerHTML =
+     trendCard('pron', 'Failure rate over time',
+       "Lower is better. The dashed grey line is every tracked sound together; tick a "+
+       "sound to follow it. Each point is a rolling "+(T.days||7)+" days ending on the "+
+       "date shown, so the newest point always has a full week behind it. A window with "+
+       "fewer than "+T.min_week+" attempts of a sound is skipped — one slip would move it "+
+       "by more than "+Math.round(100/(T.min_week||10))+" points — and the line jumps it "+
+       "as a faint dotted segment.",
+       (T.skipped
+         ? "Charting the <b>"+T.recordings+"</b> recordings with per-sound scores. <b>"+
+           T.skipped+"</b> are left out because they are still measured at word level, and "+
+           "the two methods give different numbers for identical speech — mixing them would "+
+           "draw a cliff where the measurement changed, not where your speaking did. Run "+
+           "<code>backfill_phonemes.py</code> to bring them in."
+         : "All "+T.recordings+" scored recordings, measured the same way.")+trimNote(T)) +
+     "<div class='card'><b>Pronunciation — how often each sound goes wrong</b>"+
+       "<p class='hint' style='margin:6px 0 2px'>"+honest+"</p>"+
+       "<p class='hint' style='margin:2px 0 10px'>From <b>"+p.recordings+"</b> scored recordings · <b>"+
+         p.words+"</b> words · <b>"+p.slots+"</b> tracked sounds. Your average failure rate is <b>"+
+         p.baseline+"%</b> — that is the tick on each bar. Sorted by how confidently a sound beats it.</p>"+
+       soundRows(p)+"</div>";
+   seed3('pron'); drawChart('pron');
+ }
+
+ function gstats(){
+   var D=window.ERRSTATS||{}, g=D.gram||{}, T=D.gtrend||{};
+   if(!g.rows||!g.rows.length){ body().innerHTML="<div class='card'>Nothing logged yet — "+
+     "analyze a recording with grammar feedback switched on.</div>"; return; }
+   body().innerHTML =
+     trendCard('gram', 'Mistakes over time',
+       "Lower is better. The dashed grey line is every type together; tick a type to follow "+
+       "it. Each point is a rolling "+(T.days||7)+" days ending on the date shown, so the "+
+       "newest point always has a full week behind it and today's recording is already in "+
+       "it. Every point is the same length, so distance along the axis is time — a stretch "+
+       "you did not record in shows up as space, not as a missing tick.",
+       "From <b>"+T.recordings+"</b> recordings across <b>"+(T.weeks||[]).length+
+       "</b> windows."+trimNote(T)+" These come from the language model, so "+
+       "changing the analyser or its strictness nudges the counts a little on its own — "+
+       "read a steady slope, not a single step.") +
+     "<div class='card'><b>What you say wrong — by type</b>"+
+       "<p class='hint' style='margin:6px 0 10px'>"+g.total+" distinct findings across "+g.spoken+
+         " assessed words. <i>Per 1k</i> is the comparable number — raw counts just track how much you recorded.</p>"+
+       "<table><tr><th>Type</th><th>Times</th><th>Share</th><th>Per 1k words</th><th></th></tr>"+
+       (g.rows||[]).map(function(r,i){
+         return "<tr><td><b>"+S.esc(r.label)+"</b></td><td>"+r.n+"</td><td>"+r.share+"%</td>"+
+           "<td><b>"+r.per_1k+"</b></td>"+
+           "<td><button class='btn small' onclick=\"GX.eg("+i+")\">examples</button></td></tr>"+
+           "<tr id='eg-"+i+"' style='display:none'><td colspan='5'>"+
+             (r.examples||[]).map(function(x){
+               return "<div style='margin:4px 0'><span class='bad'>"+S.esc(x.said)+"</span> → "+
+                 S.esc(x.correction)+"<br><span class='hint'>"+S.esc(x.rule)+"</span></div>";
+             }).join('')+"</td></tr>";
+       }).join('')+"</table></div>";
+   seed3('gram'); drawChart('gram');
+ }
+ // Logging a mistake by hand is not a third of this panel — it is one button on
+ // the log it writes into, revealed only when asked for.
+ var ADD=false;
+ function addBar(){
+   return "<div class='bsfilter'><button class='btn small' onclick='GX.toggleAdd()'>"+
+     (ADD?"✕ Cancel":"➕ Log a mistake by hand")+"</button></div>"+
+     (ADD? "<div class='card'>"+
+       "<label>You said (wrong)<br><input id='gx-s' style='width:100%'></label>"+
+       "<label style='display:block;margin-top:8px'>Correction<br><input id='gx-c' style='width:100%'></label>"+
+       "<label style='display:block;margin-top:8px'>Rule / tag<br><input id='gx-r' style='width:100%' placeholder='e.g. article, preposition'></label>"+
+       "<button class='btn' style='margin-top:12px' onclick='GX.add()'>Save</button> "+
+       "<span id='gx-msg' class='hint'></span></div>" : "");
+ }
  function log(){ var all=recs().map(function(x){return {said:x.said,correction:x.correction,rule:x.rule,src:x.from||'recording'};})
      .concat(seed().map(function(x){return {said:x.said,correction:x.correction,rule:x.rule,src:'Mandarin L1'};}))
      .concat(manual().map(function(x){return {said:x.said,correction:x.correction,rule:x.rule,src:'manual'};}));
-   if(!all.length){body().innerHTML="<div class='card'>No grammar errors yet — analyze a recording or log one by hand.</div>";return;}
+   if(!all.length){body().innerHTML=addBar()+"<div class='card'>No grammar errors yet — analyze a recording or log one by hand.</div>";return;}
    var by={}; all.forEach(function(x){(by[x.rule||'misc']=by[x.rule||'misc']||[]).push(x);});
    var mastered=S.get('gram_mastered',[])||[];
    var keys=Object.keys(by).filter(function(k){return mastered.indexOf(k)<0;})
      .sort(function(a,b){return by[b].length-by[a].length;});
    var restoreBar=mastered.length?("<div class='bsfilter'><span class='hint'>"+mastered.length+
      " pattern(s) mastered</span> <button class='btn small' onclick='GX.restore()'>↺ Restore all</button></div>"):"";
-   if(!keys.length){ body().innerHTML=restoreBar+"<div class='card'>🎉 All grammar patterns mastered — restore any time.</div>"; return; }
-   body().innerHTML=restoreBar+keys.map(function(r){return "<div class='card'>"+
+   if(!keys.length){ body().innerHTML=addBar()+restoreBar+"<div class='card'>🎉 All grammar patterns mastered — restore any time.</div>"; return; }
+   body().innerHTML=addBar()+restoreBar+keys.map(function(r){return "<div class='card'>"+
      "<div style='display:flex;justify-content:space-between;align-items:center;gap:8px'>"+
        "<b>"+S.esc(r)+" · "+by[r].length+"×</b>"+
        "<button class='btn small' data-rule=\""+S.esc(r)+"\" onclick='GX.master(this)' "+
        "style='background:rgba(67,197,158,.18);border-color:var(--good);color:var(--good)'>✓ Mastered</button></div>"+
      "<table style='margin-top:8px'><tr><th>You said</th><th>Correction</th><th></th></tr>"+
      by[r].map(function(x){return "<tr><td class='bad'>"+S.esc(x.said)+"</td><td>"+S.esc(x.correction)+"</td><td class='hint'>"+S.esc(x.src)+"</td></tr>";}).join('')+"</table></div>";}).join(''); }
- function addForm(){ body().innerHTML="<div class='card'>"+
-   "<label>You said (wrong)<br><input id='gx-s' style='width:100%'></label>"+
-   "<label style='display:block;margin-top:8px'>Correction<br><input id='gx-c' style='width:100%'></label>"+
-   "<label style='display:block;margin-top:8px'>Rule / tag<br><input id='gx-r' style='width:100%' placeholder='e.g. article, preposition'></label>"+
-   "<button class='btn' style='margin-top:12px' onclick='GX.add()'>Save</button> <span id='gx-msg' class='hint'></span></div>"; }
+
  window.GX={ add:function(){var s=document.getElementById('gx-s').value.trim(); if(!s){document.getElementById('gx-msg').textContent='Required';return;}
    var a=manual(); a.push({said:s,correction:document.getElementById('gx-c').value.trim(),rule:document.getElementById('gx-r').value.trim()||'misc'}); S.set('gram_log',a);
    document.getElementById('gx-msg').textContent='Saved ✓'; ['gx-s','gx-c','gx-r'].forEach(function(i){document.getElementById(i).value='';}); },
+   toggleAdd:function(){ ADD=!ADD; render(); },
+   eg:function(i){ var t=document.getElementById('eg-'+i); if(t) t.style.display = t.style.display==='none'?'':'none'; },
    master:function(btn){ var r=(btn&&btn.getAttribute)?btn.getAttribute('data-rule'):btn;
      var m=S.get('gram_mastered',[])||[]; if(r&&m.indexOf(r)<0)m.push(r); S.set('gram_mastered',m); render(); },
    restore:function(){ S.set('gram_mastered',[]); render(); } };
@@ -3615,6 +4183,577 @@ def _photo_desc_panel():
             "<script>%s</script>" % _PHOTO_DESC_JS)
 
 
+# ---------------------------------------------------------------------------
+# 5b. Speaking error statistics — not "what went wrong" but "how often, out of
+#     how many chances". A raw count of θ mistakes is meaningless on its own:
+#     the question is how many times you said a θ at all. Everything below is
+#     built to produce that denominator.
+# ---------------------------------------------------------------------------
+
+_SV = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY",
+       "OW", "OY", "UH", "UW"}
+#: Azure and CMUdict do not use the same ARPAbet. Azure emits `ax` for schwa
+#: and `dx` for a flapped t; CMUdict writes those AH0 and T. Left unfolded, the
+#: same sound is counted as two different ones and every rate is wrong.
+_SFIX = {"AX": "AH", "AXR": "ER", "IX": "IH", "UX": "UW", "DX": "T",
+         "NX": "N", "EL": "L", "EM": "M", "EN": "N", "WH": "W"}
+
+
+def _stat_phone(p):
+    """One ARPAbet symbol, stress stripped and alphabet folded."""
+    p = re.sub(r"\d", "", (p or "").upper())
+    return _SFIX.get(p, p)
+
+
+def _stat_seq(word, stored=None):
+    """The phonemes of one spoken word.
+
+    Prefers what Azure says it graded you against; falls back to CMUdict for
+    recordings analysed before that was recorded. Falling back matters — it is
+    the difference between the report covering 12 recordings and all 43.
+    """
+    if stored:
+        return [_stat_phone(p) for p in stored if p]
+    w = re.sub(r"[^a-z']", "", (word or "").lower())
+    prons = _cmu().get(w)
+    return [_stat_phone(p) for p in prons[0]] if prons else []
+
+
+def _stat_roles(seq):
+    """(phone, role) per slot, where role is what makes a sound hard.
+
+    Position is not cosmetic here. A /l/ before the vowel ("light") and a /l/
+    after it ("feel") are different articulations — the second is the dark l
+    that Mandarin has no equivalent for — and a stop at the end of a word is
+    the one that gets dropped. Counting them together would average the
+    problem away.
+    """
+    vi = [i for i, p in enumerate(seq) if p in _SV]
+    out = []
+    for i, p in enumerate(seq):
+        if p in _SV:
+            role = "nucleus"
+        elif not vi:
+            role = "onset"
+        elif i < vi[0]:
+            role = "onset"
+        elif i > vi[-1]:
+            role = "final" if i == len(seq) - 1 else "coda"
+        else:
+            role = "medial"
+        out.append((p, role))
+    return out
+
+
+#: The sounds worth tracking, and why each one is on the list. Keyed so the
+#: stats survive relabelling. `hit` decides whether a slot counts as an
+#: encounter of this sound.
+SOUND_GROUPS = [
+    ("th_unvoiced", "θ — think, three, month", "Mandarin has no θ; it usually surfaces as /s/ or /t/.",
+     lambda p, r: p == "TH"),
+    ("th_voiced", "ð — this, other, breathe", "No ð in Mandarin either; commonly becomes /d/ or /z/.",
+     lambda p, r: p == "DH"),
+    ("final_stop", "final d t p k b g — need, hope, work", "Mandarin syllables cannot end in a stop, so the ending gets dropped.",
+     lambda p, r: r == "final" and p in {"D", "T", "P", "K", "B", "G"}),
+    ("dark_l", "dark l — feel, milk, well", "Coda /l/. Mandarin has no syllable-final l; it tends to vanish or turn into a vowel.",
+     lambda p, r: p == "L" and r in ("coda", "final")),
+    ("clear_l", "clear l — light, believe", "Onset /l/, the easy one — here as a control for the dark l row.",
+     lambda p, r: p == "L" and r == "onset"),
+    ("r_sound", "/r/ — right, very, world", "English /r/ is not the Mandarin r; the tongue must not touch.",
+     lambda p, r: p == "R"),
+    ("er_vowel", "/ɜr/ — work, learn, first", "R-coloured vowel. Often produced flat, without the r.",
+     lambda p, r: p == "ER"),
+    ("ng_sound", "/ŋ/ — thing, going, long", "Exists in Mandarin, but often loses its final closure in English.",
+     lambda p, r: p == "NG"),
+    ("v_sound", "/v/ — very, love, seven", "Mandarin has no /v/; it drifts toward /w/.",
+     lambda p, r: p == "V"),
+    ("final_sz", "final s / z — books, needs, is", "Grammatical endings. Dropping them costs plurals and tenses, not just sound.",
+     lambda p, r: r == "final" and p in {"S", "Z"}),
+    ("final_n", "final n — man, been, soon", "Often merged with /ŋ/ or nasalised into the vowel.",
+     lambda p, r: p == "N" and r in ("coda", "final")),
+    ("post_alveolar", "ʃ tʃ dʒ — she, church, judge", "Mandarin's nearest sounds are further forward and sound thinner.",
+     lambda p, r: p in {"SH", "CH", "JH", "ZH"}),
+    ("tense_lax", "iː vs ɪ — seat vs sit", "Mandarin has one high front vowel; English contrasts two.",
+     lambda p, r: p in {"IY", "IH"}),
+    ("ae_vowel", "/æ/ — cat, bad, hand", "No Mandarin equivalent; usually lands somewhere near /e/.",
+     lambda p, r: p == "AE"),
+]
+
+#: Below this an Azure phoneme score counts as a weak production. Azure's own
+#: banding treats the 60s as borderline, so this is the top of "clearly wrong"
+#: rather than a cutoff invented here.
+WEAK_BELOW = 60
+
+#: Fewer attempts than this and the row is shown, but not ranked among the rest.
+#: Not a statistical threshold — the interval below already handles uncertainty,
+#: and it is quite happy to report that 2-of-3 means a real rate above 20%.
+#: That is true and still the wrong thing to put at the top of a report: a
+#: sound you have attempted three times is not a habit yet, and drilling it
+#: instead of the one you get wrong 135 times a month is wasted practice.
+MIN_ENCOUNTERS = 25
+
+
+def _wilson_lo(k, n, z=1.96):
+    """Lower bound of the 95% interval on k/n.
+
+    Ranking on the raw rate puts 2-out-of-3 above 120-out-of-1000, which is how
+    a report ends up telling you to drill a sound you have said three times.
+    """
+    if not n:
+        return 0.0
+    p = k / n
+    den = 1 + z * z / n
+    return max(0.0, (p + z * z / (2 * n) -
+                     z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)) / den)
+
+
+def pronunciation_error_stats(items, weak_below=WEAK_BELOW):
+    """How often each tracked sound was attempted, and how often it was weak.
+
+    Two levels of evidence, and the report says which one it is using:
+
+    * **exact** — Azure scored every phoneme individually (`pacc`), so a weak
+      /r/ is counted where the /r/ actually is.
+    * **attributed** — older recordings kept only a word-level verdict, so a
+      word Azure flagged is charged to every tracked sound inside it. The
+      encounter counts are still exact; the failure counts are an upper bound,
+      and a sound that shares words with a genuinely bad one inherits blame it
+      does not deserve. Read the ratio, not the absolute rate.
+    """
+    groups = {k: {"key": k, "label": lab, "note": note, "n": 0, "bad": 0,
+                  "exact_n": 0, "words": {}}
+              for k, lab, note, _ in SOUND_GROUPS}
+    tot_n = tot_bad = 0          # baseline over every tracked slot
+    words_seen = exact_words = recordings = 0
+
+    for d in items or []:
+        ws = ((d.get("azure") or {}).get("words")) or []
+        if not ws:
+            continue
+        recordings += 1
+        for w in ws:
+            seq = _stat_seq(w.get("word"), w.get("phones"))
+            if not seq:
+                continue
+            words_seen += 1
+            pacc = w.get("pacc") or []
+            exact = len(pacc) == len(seq) and any(s >= 0 for s in pacc)
+            if exact:
+                exact_words += 1
+            flagged = w.get("error") == "Mispronunciation"
+            for i, (p, role) in enumerate(_stat_roles(seq)):
+                score = pacc[i] if exact and i < len(pacc) else -1
+                if exact and score < 0:
+                    continue                     # Azure declined to score it
+                bad = (score < weak_below) if exact else flagged
+                tot_n += 1
+                tot_bad += bad
+                for key, _lab, _note, hit in SOUND_GROUPS:
+                    if not hit(p, role):
+                        continue
+                    g = groups[key]
+                    g["n"] += 1
+                    g["bad"] += bad
+                    g["exact_n"] += exact
+                    if bad:
+                        ww = (w.get("word") or "").lower()
+                        if ww:
+                            g["words"][ww] = g["words"].get(ww, 0) + 1
+
+    base = (tot_bad / tot_n) if tot_n else 0.0
+    rows = []
+    for key, lab, note, _ in SOUND_GROUPS:
+        g = groups[key]
+        if not g["n"]:
+            continue
+        rate = g["bad"] / g["n"]
+        rows.append({
+            "key": key, "label": lab, "note": note,
+            "n": g["n"], "bad": g["bad"], "rate": round(100 * rate, 1),
+            "lift": round(rate / base, 2) if base else 0,
+            "lift_lo": round(_wilson_lo(g["bad"], g["n"]) / base, 2) if base else 0,
+            "exact": g["exact_n"] == g["n"] and g["n"] > 0,
+            "thin": g["n"] < MIN_ENCOUNTERS,
+            # the words that actually went wrong, so a row is drillable
+            "examples": [w for w, _c in sorted(g["words"].items(),
+                                               key=lambda kv: -kv[1])[:8]],
+        })
+    rows.sort(key=lambda r: (r["thin"], -r["lift_lo"], -r["n"]))
+    return {
+        "mode": "exact" if exact_words and exact_words == words_seen else
+                ("mixed" if exact_words else "attributed"),
+        "exact_words": exact_words, "words": words_seen,
+        "recordings": recordings, "slots": tot_n,
+        "baseline": round(100 * base, 1), "weak_below": weak_below,
+        "rows": rows,
+    }
+
+
+#: Colours for the trend lines. The app's chart hues, re-stepped into the
+#: dark-mode lightness band so adjacent series actually separate: the original
+#: cyan and green sit ΔE 9.4 apart to normal vision, which is below the
+#: readable floor. Verified with the palette validator — all six checks pass on
+#: the #172530 chart surface. Assign in this order; never cycle or recolour on
+#: filtering, or a line changes meaning when you tick a checkbox.
+TREND_COLORS = ["#ee5c5d", "#33a4b9", "#c9820e", "#1dac86", "#a279ea"]
+
+#: A week needs at least this many attempts of a sound before its rate is
+#: plotted. The number is not taste: at n attempts one slip moves the rate by
+#: 100/n points, so below 10 a single word swings the week by more than ten
+#: points and the dot stops being a measurement. Everything from here to 40 is
+#: still jumpy rather than wrong, and the chart says so with a hollow dot —
+#: that is the marker's whole job, so this floor only has to kill the
+#: degenerate cells. Weeks it drops are still reported, as `gaps`: a rare sound
+#: like θ can fall under the line in a perfectly ordinary week, and silently
+#: erasing it makes the chart look broken.
+TREND_MIN_WEEK = 10
+
+
+#: Length of one point on both trend charts, and how many points are kept.
+#: Rolling windows counted back from today, not ISO weeks. Two reasons. The
+#: newest point always has a full seven days behind it — with calendar weeks,
+#: every Monday starts a bucket holding one day of speech, and that lone point
+#: swings wildly and reads as a sudden collapse. And because every window is
+#: the same length, position on the axis is time: a month you did not record in
+#: becomes visible space instead of being folded into the neighbouring tick.
+TREND_WINDOW_DAYS = 7
+TREND_MAX_POINTS = 20
+
+
+def _day(d):
+    """A YYYY-MM-DD string as a date, or None. Accepts a full timestamp."""
+    try:
+        return date.fromisoformat(str(d)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _windows(items, end=None, days=TREND_WINDOW_DAYS, limit=TREND_MAX_POINTS):
+    """Rolling windows covering the data, newest ending on `end` (today).
+
+    Returns `(keys, index)`: `keys` are the window start dates oldest-first —
+    every one of them, including windows you recorded nothing in, because a
+    silent fortnight is information and an axis that omits it is lying about
+    when you improved. `index` maps a date string to its window key, or drops
+    it when it falls outside (older than `limit` windows, or in the future).
+    """
+    end = end or date.today()
+    dates = [x for x in (_day(d.get("date")) for d in items or []) if x]
+    dates = [x for x in dates if x <= end]
+    if not dates:
+        return [], {}
+    oldest = (end - min(dates)).days // days          # window count, 0 = newest
+    oldest = min(oldest, limit - 1)
+    keys = [(end - timedelta(days=days * k + days - 1)).isoformat()
+            for k in range(oldest, -1, -1)]
+    index = {}
+    for d in items or []:
+        x = _day(d.get("date"))
+        if not x or x > end:
+            continue
+        k = (end - x).days // days
+        if k <= oldest:
+            index[d.get("date")] = keys[oldest - k]
+    return keys, index
+
+
+def _trim_lead(keys, weight, floor):
+    """Drop leading windows too small to open a chart on.
+
+    A trend has to start somewhere the number means something, and a run of
+    empty or near-empty windows at the front costs a column each while saying
+    nothing. Only the *lead-in* is trimmed: once the first solid window is
+    found everything after it is kept, gaps included, because a gap between two
+    real measurements is information about you rather than dead space.
+    """
+    for i, k in enumerate(keys):
+        if weight(k) >= floor:
+            return keys[i:], i
+    return keys, 0                    # nothing solid yet — show what there is
+
+
+def _wend(keys, days=TREND_WINDOW_DAYS):
+    """Window start -> its last day, so the axis can label the span it covers."""
+    out = {}
+    for k in keys:
+        d = _day(k)
+        if d:
+            out[k] = (d + timedelta(days=days - 1)).isoformat()
+    return out
+
+
+def pronunciation_trend(items, weak_below=WEAK_BELOW, min_week=TREND_MIN_WEEK,
+                        end=None):
+    """Failure rate per sound over rolling weeks — the shape of getting better.
+
+    Only recordings measured the *same way* are charted. This is the whole
+    reason this function is not a two-line group-by: exact per-phoneme scoring
+    and word-level attribution produce different numbers for identical speech
+    (θ reads about 6% attributed and about 20% exact), so a library that was
+    part-upgraded would show a cliff exactly where the backfill stopped. That
+    cliff is a change in the instrument, not in the speaker, and drawing it as
+    a trend would be a lie in chart form.
+
+    Exact recordings win when there are any, because they are the ones worth
+    trusting; the count of what was left out is returned so the UI can say so.
+    """
+    exact_items, att_items = [], []
+    for d in items or []:
+        ws = ((d.get("azure") or {}).get("words")) or []
+        if not ws or not d.get("date"):
+            continue
+        n_exact = sum(1 for w in ws if w.get("pacc"))
+        (exact_items if n_exact == len(ws) else att_items).append(d)
+
+    use, mode = (exact_items, "exact") if exact_items else (att_items, "attributed")
+    skipped = len(att_items) if exact_items else 0
+
+    weeks, index = _windows(use, end)
+
+    # window -> sound -> [encounters, weak];  plus "" for the all-sounds baseline
+    grid = {}
+    for d in use:
+        wk = index.get(d.get("date"))
+        if not wk:
+            continue
+        cell = grid.setdefault(wk, {})
+        for w in ((d.get("azure") or {}).get("words")) or []:
+            seq = _stat_seq(w.get("word"), w.get("phones"))
+            if not seq:
+                continue
+            pacc = w.get("pacc") or []
+            exact = len(pacc) == len(seq)
+            flagged = w.get("error") == "Mispronunciation"
+            for i, (p, role) in enumerate(_stat_roles(seq)):
+                score = pacc[i] if exact and i < len(pacc) else -1
+                if exact and score < 0:
+                    continue
+                bad = (score < weak_below) if exact else flagged
+                base = cell.setdefault("", [0, 0])
+                base[0] += 1
+                base[1] += bad
+                for key, _lab, _note, hit in SOUND_GROUPS:
+                    if hit(p, role):
+                        c = cell.setdefault(key, [0, 0])
+                        c[0] += 1
+                        c[1] += bad
+
+    # 40 attempts is the same number the hollow dot uses: below it a window is
+    # too jumpy to read, and one at the very front has nothing before it to be
+    # read against either.
+    weeks, trimmed = _trim_lead(weeks, lambda w: grid.get(w, {}).get("", [0])[0], 40)
+    labels = {k: lab for k, lab, _n, _h in SOUND_GROUPS}
+
+    def line(key):
+        """Plottable points, plus the weeks that were too thin to plot.
+
+        The thin weeks come back rather than vanishing: the chart needs to
+        know a gap is "too few attempts", not "never came up", and the table
+        needs to show the count so a dash is never unexplained.
+        """
+        pts, gaps = [], {}
+        for wk in weeks:
+            n, bad = grid.get(wk, {}).get(key, [0, 0])
+            if n < min_week:
+                if n:
+                    gaps[wk] = n
+                continue                      # too thin to mean anything
+            pts.append({"w": wk, "n": n, "bad": bad,
+                        "rate": round(100.0 * bad / n, 1)})
+        return pts, gaps
+
+    series = []
+    for key, lab, _note, _hit in SOUND_GROUPS:
+        pts, gaps = line(key)
+        if len(pts) >= 2:                     # one point is not a trend
+            n = sum(p["n"] for p in pts)
+            bad = sum(p["bad"] for p in pts)
+            series.append({"key": key, "label": lab, "points": pts,
+                           "gaps": gaps,
+                           "total": n, "rate": round(100.0 * bad / n, 1)})
+    # worst first — the chart should open on what is costing you something,
+    # not on whichever sound happens to be commonest in English
+    series.sort(key=lambda s: (-s["rate"], -s["total"]))
+    return {"weeks": weeks, "wend": _wend(weeks), "series": series,
+            "overall": line("")[0],
+            "mode": mode, "skipped": skipped, "min_week": min_week,
+            "days": TREND_WINDOW_DAYS, "trimmed": trimmed,
+            "colors": TREND_COLORS,
+            "recordings": sum(1 for d in use if index.get(d.get("date")) in set(weeks))}
+
+
+#: Error types for what you *say* wrong, as opposed to mis-pronounce. Ordered:
+#: the first pattern that matches the analyser's own stated rule wins, so the
+#: specific ones have to come before the general ones.
+GRAMMAR_TYPES = [
+    ("tense", "Verb tense", r"\btense\b|past (simple|continuous|perfect|form)|present (simple|continuous|perfect)|future|\b-?ed form\b|past participle"),
+    ("agreement", "Subject–verb agreement", r"agreement|agrees? with|third[- ]person|subject.{0,4}verb"),
+    ("article", "Articles (a / an / the)", r"\barticles?\b|definite|indefinite|\b(the|a|an)['’]?\s+(is|before|with|for|goes|needed|required|missing)"),
+    ("number", "Plural / countability", r"\bplurals?\b|\bsingular\b|uncountable|countable|count noun|no plural"),
+    ("preposition", "Prepositions", r"\bpreposition|\buse '(in|on|at|of|to|for|with|from|by|about|into|over|under)'|\badd '(of|to|in|on|for|with)'"),
+    ("modal", "Modals & auxiliaries", r"\bmodal|auxiliar|after '(should|would|could|must|can|will|might)'|\bbase verb\b|\bbare infinitive\b"),
+    ("wordform", "Word form", r"\b(adjective|adverb|noun form|verb form|gerund|infinitive|participle)\b|not a verb|as a verb"),
+    ("pronoun", "Pronouns", r"\bpronoun|\bits?\b for|antecedent|reflexive|avoid repetition"),
+    ("order", "Word order", r"word order|order of|placement|position of|restructure"),
+    ("clause", "Clause & connectors", r"\bclause|conjunction|relative pronoun|run-on|comma splice|sentence fragment|unnecessary '(that|which)'"),
+    ("comparative", "Comparatives", r"comparative|superlative|\bthan\b"),
+    ("wordchoice", "Word choice / collocation", r"collocation|natural|idiomatic|more common|better word|word choice|phrasing|doesn't take|use '"),
+]
+_GT = [(k, lab, re.compile(pat, re.I)) for k, lab, pat in GRAMMAR_TYPES]
+
+
+def classify_grammar_error(g):
+    """Which type of mistake one finding is. '' when nothing fits."""
+    rule = g.get("rule") or ""
+    for key, _lab, rx in _GT:
+        if rx.search(rule):
+            return key
+    # Nothing in the stated rule — fall back to what actually changed. An
+    # article that appears in the correction and not in what you said is an
+    # omitted article, whatever the analyser chose to call it.
+    said = set(re.findall(r"[a-z']+", (g.get("said") or "").lower()))
+    corr = set(re.findall(r"[a-z']+", (g.get("correction") or "").lower()))
+    arts = {"a", "an", "the"}
+    if len(corr & arts) > len(said & arts):
+        return "article"
+    blob = "%s %s" % (g.get("correction") or "", g.get("said") or "")
+    for key, _lab, rx in _GT:
+        if rx.search(blob):
+            return key
+    return ""
+
+
+def grammar_error_stats(items):
+    """Typed counts of what you say wrong, with a rate you can compare over time.
+
+    Deduplicated on (said, correction) the same way the log above it is, so one
+    mistake quoted in two analyses is one mistake.
+    """
+    labels = dict((k, lab) for k, lab, _ in GRAMMAR_TYPES)
+    counts, examples, seen = {}, {}, set()
+    spoken = 0
+    for d in items or []:
+        spoken += len(((d.get("azure") or {}).get("words")) or [])
+        for g in d.get("grammar", []) or []:
+            key = (g.get("said", ""), g.get("correction", ""))
+            if not g.get("said") or key in seen:
+                continue
+            seen.add(key)
+            t = classify_grammar_error(g) or "other"
+            counts[t] = counts.get(t, 0) + 1
+            examples.setdefault(t, []).append(
+                {"said": g.get("said", "")[:120],
+                 "correction": g.get("correction", "")[:120],
+                 "rule": g.get("rule", "")[:140]})
+    total = sum(counts.values())
+    rows = []
+    for t, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        rows.append({
+            "key": t, "label": labels.get(t, "Other / unclassified"),
+            "n": n, "share": round(100.0 * n / total, 1) if total else 0,
+            # per 1000 words assessed — the only way a count means anything
+            # across recordings of very different lengths
+            "per_1k": round(1000.0 * n / spoken, 2) if spoken else 0,
+            "examples": examples.get(t, [])[:6],
+        })
+    return {"rows": rows, "total": total, "spoken": spoken}
+
+
+#: A grammar point wants about this many words behind it. Under the line the
+#: rate is real but jumpy — 700 words is one long recording's opinion, and a
+#: single analysis that ran strict swings the whole point — so it is drawn as a
+#: hollow dot rather than merged away. The pronunciation chart has said exactly
+#: this with exactly that marker since it was built; one mechanism for "thin"
+#: across both charts beats two.
+TREND_BUCKET_WORDS = 1000
+
+#: Below this a window is not plotted at all. A rate off 80 words is arithmetic
+#: on noise. Skipped windows come back as `gaps` so the line can dot across
+#: them and the table can say how few words there were.
+TREND_MIN_WORDS = 200
+
+
+def grammar_trend(items, bucket_words=TREND_BUCKET_WORDS,
+                  min_words=TREND_MIN_WORDS, end=None):
+    """Rate of each mistake type over rolling weeks, per 1000 words spoken.
+
+    Per 1000 rather than per window, because a raw count mostly measures how
+    much you recorded: a heavy week looks like a bad week.
+
+    Windows are the same rolling seven days the pronunciation chart uses, so
+    the two read against each other and position on the axis means time. A
+    window you barely spoke in is drawn hollow, and one with almost nothing in
+    it is skipped and dotted across — the same two-tier treatment as a rare
+    sound, for the same reason: silently merging or deleting a stretch of
+    history hides when you were actually improving.
+
+    Unlike the pronunciation trend there is no measurement-mode split to worry
+    about, so every scored recording counts. The softer caveat is that these
+    come from an LLM: change the analyser or its strictness and the counts move
+    a little, independently of your English.
+    """
+    labels = dict((k, lab) for k, lab, _ in GRAMMAR_TYPES)
+    weeks, index = _windows(items, end)
+    weeks_words, grid = {}, {}
+    for d in items or []:
+        wk = index.get(d.get("date"))
+        if not wk:
+            continue
+        spoken = len(((d.get("azure") or {}).get("words")) or [])
+        if not spoken:
+            spoken = len((d.get("polished") or "").split())
+        weeks_words[wk] = weeks_words.get(wk, 0) + spoken
+        cell = grid.setdefault(wk, {})
+        # Deduplicated per recording, not globally: the same slip listed twice
+        # in one analysis is one mistake, but making it again next week is
+        # exactly the thing this chart exists to show.
+        seen = set()
+        for g in d.get("grammar", []) or []:
+            key = (g.get("said", ""), g.get("correction", ""))
+            if not g.get("said") or key in seen:
+                continue
+            seen.add(key)
+            t = classify_grammar_error(g) or "other"
+            cell[t] = cell.get(t, 0) + 1
+            cell[""] = cell.get("", 0) + 1
+
+    weeks, trimmed = _trim_lead(weeks, lambda w: weeks_words.get(w, 0), bucket_words)
+
+    def line(key):
+        """Points, plus the windows too quiet to carry a rate (`gaps`)."""
+        pts, gaps = [], {}
+        for wk in weeks:
+            words = weeks_words.get(wk, 0)
+            if words < min_words:
+                if words:
+                    gaps[wk] = words
+                continue
+            n = grid.get(wk, {}).get(key, 0)
+            pts.append({"w": wk, "n": n, "words": words,
+                        "thin": words < bucket_words,
+                        "rate": round(1000.0 * n / words, 2)})
+        return pts, gaps
+
+    series = []
+    for key in set(k for c in grid.values() for k in c if k):
+        pts, gaps = line(key)
+        if sum(p["n"] for p in pts) and len(pts) >= 2:
+            series.append({"key": key, "label": labels.get(key, "Other / unclassified"),
+                           "points": pts, "gaps": gaps,
+                           "total": sum(p["n"] for p in pts),
+                           "rate": round(sum(p["n"] for p in pts) * 1000.0 /
+                                         sum(p["words"] for p in pts), 2)})
+    series.sort(key=lambda s: (-s["rate"], -s["total"]))
+    return {"weeks": weeks, "wend": _wend(weeks),
+            "series": series, "overall": line("")[0],
+            "colors": TREND_COLORS, "bucket_words": bucket_words,
+            "min_words": min_words, "days": TREND_WINDOW_DAYS,
+            "trimmed": trimmed,
+            "recordings": sum(1 for d in items or []
+                              if index.get(d.get("date")) in set(weeks)),
+            "unit": "per 1k words"}
+
+
 def _grammar_panel(items):
     from collections import OrderedDict
     seen = OrderedDict()
@@ -3626,6 +4765,11 @@ def _grammar_panel(items):
                              "rule": g.get("rule", ""), "from": d.get("title", "")}
     payload = json.dumps(list(seen.values()), ensure_ascii=False).replace("</", "<\\/")
     seed = json.dumps(_GRAMMAR_SEED, ensure_ascii=False).replace("</", "<\\/")
+    stats = json.dumps({"pron": pronunciation_error_stats(items),
+                        "gram": grammar_error_stats(items),
+                        "trend": pronunciation_trend(items),
+                        "gtrend": grammar_trend(items)},
+                       ensure_ascii=False).replace("</", "<\\/")
     return ("<section id='grammar' class='tabpanel hidden'>"
             "<h1>Speaking error log — your recurring mistakes</h1>"
             "<p class='sub'>Everything the analysis flags in what you <b>say</b>: grammar, "
@@ -3634,12 +4778,13 @@ def _grammar_panel(items):
             "<span class='hint'>(What you mis-<b>hear</b> is tracked separately, in the "
             "listening module.)</span></p>"
             "<div class='drillnav'>"
-            "<button class='btn small active' data-m='log' onclick='gxMode(this)'>📋 Grammar log</button>"
-            "<button class='btn small' data-m='add' onclick='gxMode(this)'>➕ Log a mistake</button>"
+            "<button class='btn small active' data-m='log' onclick='gxMode(this)'>📋 Grammar error log</button>"
+            "<button class='btn small' data-m='gstats' onclick='gxMode(this)'>📊 Grammar error by type stats</button>"
+            "<button class='btn small' data-m='pstats' onclick='gxMode(this)'>🗣️ Pronunciation error stats</button>"
             "</div><div id='gx-body'></div>"
             "</section>"
-            "<script>window.GRAMMAR_DATA=%s;window.GRAMMAR_SEED=%s;%s</script>"
-            % (payload, seed, _GRAMMAR_JS))
+            "<script>window.GRAMMAR_DATA=%s;window.GRAMMAR_SEED=%s;window.ERRSTATS=%s;%s</script>"
+            % (payload, seed, stats, _GRAMMAR_JS))
 
 
 def _load_json(name):
@@ -3659,6 +4804,9 @@ _ARPA2IPA = {
     "S": "s", "SH": "ʃ", "T": "t", "TH": "θ", "UH": "ʊ", "UW": "uː", "V": "v",
     "W": "w", "Y": "j", "Z": "z", "ZH": "ʒ",
 }
+#: Overrides for stress 0 — see word_ipa(). CMUdict marks the weak forms with a
+#: trailing 0 and reuses the strong vowel's symbol; IPA does not.
+_ARPA2IPA_WEAK = {"AH": "ə", "ER": "ər"}
 _CMU = None
 _VOWELS_ARPA = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY",
                 "OW", "OY", "UH", "UW"}
@@ -3834,9 +4982,15 @@ def word_ipa(word):
     toks = []           # (ipa, is_vowel, stress)
     for p in phones[0]:
         base = re.sub(r"\d", "", p)
-        stress = (re.search(r"\d", p) or [""])
         s = p[-1] if p[-1].isdigit() else ""
-        ipa = "ə" if (base == "AH" and s == "0") else _ARPA2IPA.get(base, "")
+        # Two ARPAbet vowels mean different things stressed and unstressed, and
+        # the table can only hold one symbol each. AH is ʌ in "cup" but schwa in
+        # "about"; ER is the NURSE vowel ɜr in "bird" but r-coloured schwa ər in
+        # "letter" — printing ɜr there claims the second syllable of "letter"
+        # sounds like "bird", which is a stress error, not a spelling nicety.
+        ipa = _ARPA2IPA_WEAK.get(base) if s == "0" else None
+        if ipa is None:
+            ipa = _ARPA2IPA.get(base, "")
         toks.append([ipa, base in _VOWELS_ARPA, s])
 
     nsyl = sum(1 for t in toks if t[1])
