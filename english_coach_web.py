@@ -744,7 +744,11 @@ def _form_panel(msg="", active=""):
                style='padding:6px 12px;border-radius:8px;border:0;background:#2c4a58;
                color:#fff;cursor:pointer'>● Record in browser</button>
             <span id='mic-status' class='hint' style='margin-left:8px'></span>
+            <button type='button' class='btn small' style='margin-left:8px'
+               onclick='pickPhoto()'>🎲 Describe a random photo</button>
+            <span id='pp-status' class='hint' style='margin-left:8px'></span>
           </div>
+          <div id='pp-box'></div>
           <div style='margin-top:10px;border-top:1px solid var(--line);padding-top:10px'>
             <label>Save to folder
               <input type='text' name='save_folder' id='save-folder' list='folder-list'
@@ -1039,6 +1043,65 @@ def _form_panel(msg="", active=""):
             out.textContent='Recording… say \"'+word+'\"';
           }).catch(function(){ out.textContent='Mic permission denied.'; });
         }
+        // A random photo of your own to talk about, so a session never stalls
+        // on "what should I even say?".
+        //
+        // Kimi's description is deliberately NOT shown. This panel exists to
+        // make you produce language; a description on screen turns the exercise
+        // into reading aloud, and the score would then measure your eyes. You
+        // check yourself afterwards in Describe a photo, which is what its
+        // Review mode already does — word for word against the same text.
+        var PP_LAST='';
+        function pickPhoto(){
+          var st=document.getElementById('pp-status');
+          var box=document.getElementById('pp-box');
+          var S=window.SkillStore;
+          var all=(S ? S.get('ec_photos',[]) : []) || [];
+          // `imgGone` entries kept their words but had the image file reclaimed
+          // to save space, so there is nothing left to look at.
+          var pool=all.filter(function(p){ return p && p.img && !p.imgGone && p.desc; });
+          if(!pool.length){
+            box.innerHTML='';
+            st.innerHTML = all.length
+              ? "Your saved photos have no image left to show — take a new one in "+
+                "<b>Describe a photo</b>."
+              : "No described photos yet — take one in <b>Describe a photo</b> first.";
+            return;
+          }
+          var pick=pool[Math.floor(Math.random()*pool.length)];
+          // Two in a row is the one outcome that reads as "the button is broken".
+          if(pool.length>1){
+            for(var i=0; i<20 && pick.id===PP_LAST; i++)
+              pick=pool[Math.floor(Math.random()*pool.length)];
+          }
+          PP_LAST=pick.id;
+          st.textContent = pool.length>1 ? ('picked from '+pool.length+' photos') : '';
+          box.innerHTML=
+            "<div class='card' style='margin:10px 0 0'>"+
+              "<img src='"+pick.img+"' alt='Photo to describe' "+
+                "style='max-width:100%%;max-height:440px;border-radius:10px;display:block' "+
+                "onerror=\\\"this.style.display='none';"+
+                "document.getElementById('pp-status').textContent="+
+                "'That image file is missing — try another.';\\\">"+
+              "<p class='hint' style='margin:8px 0 0'>Say what you see, out loud, then record it "+
+                "above. What the model wrote stays hidden on purpose — check yourself against it "+
+                "afterwards.</p>"+
+              "<div style='margin-top:8px'>"+
+                "<button type='button' class='btn small' onclick='pickPhoto()'>🎲 Another photo</button> "+
+                "<button type='button' class='btn small' onclick=\\\"openSavedPhoto('"+pick.id+"')\\\">"+
+                  "🧠 Open it in Describe a photo</button>"+
+                "<span class='hint' style='margin-left:8px'>saved "+
+                  (pick.d||'').replace(/</g,'')+"</span>"+
+              "</div>"+
+            "</div>";
+        }
+        // Both of these are defined by the dashboard shell; guard anyway, since
+        // this panel also renders in builds where the photo panel is absent.
+        function openSavedPhoto(id){
+          if(window.PD && window.PD.open) window.PD.open(id);
+          if(window.showPanel) window.showPanel('photodesc');
+        }
+        window.pickPhoto=pickPhoto; window.openSavedPhoto=openSavedPhoto;
         window.recordMic=recordMic; window.practiceRecord=practiceRecord;
         // polished texts from past recordings can be reused as the script for a reread
         window.loadReading=function(i){ if(i===''||i==null)return; var s=(window.READING_ITEMS||[])[i];
