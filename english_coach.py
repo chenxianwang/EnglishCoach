@@ -7569,7 +7569,11 @@ def _practice_bars(buckets, elid, visible):
 _WEEKLY_PRON_JS = r"""
 (function(){
  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
- var WEEKS=12, GOAL=%d;
+ // MIN_WEEK is a floor for OPENING the chart, not for plotting: a week resting
+ // on one or two attempts is a coin flip, and putting it first makes the whole
+ // trend start from noise. Interior thin weeks are kept — a dip between two
+ // real measurements says something; a lone dot before you started doesn't.
+ var WEEKS=12, GOAL=%d, MIN_WEEK=5, TAIL=4;
  // Every source of an Azure pronunciation score. 'rec' comes from the server
  // (history.json); the other two are score-history prefixes in SkillStore.
  var SERIES=[['rec','Speaking','#46b3c9'],
@@ -7580,6 +7584,24 @@ _WEEKLY_PRON_JS = r"""
    return d.toISOString().slice(0,10);
  }
  function label(ds){ var p=ds.split('-'); return MON[+p[1]-1]+' '+(+p[2]); }
+ // Local date, not toISOString(): UTC is a day behind here for most of the
+ // evening, which would put "this week" in the previous one every Monday.
+ function today(){
+   var d=new Date(), p=function(n){ return (n<10?'0':'')+n; };
+   return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+ }
+ function span(wk){                       // "Aug 3 – 9" / "Jul 27 – Aug 2"
+   var d=new Date(wk+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+6);
+   var end=d.toISOString().slice(0,10);
+   return label(wk)+' – '+(end.slice(5,7)===wk.slice(5,7) ? +end.slice(8) : label(end));
+ }
+ function addWeeks(wk,n){
+   var d=new Date(wk+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+7*n);
+   return d.toISOString().slice(0,10);
+ }
+ function weeksApart(a,b){
+   return Math.round((new Date(b+'T12:00:00Z')-new Date(a+'T12:00:00Z'))/6048e5);
+ }
  function pairs(src, scores){
    if(src==='rec') return (window.PRON_WEEKLY_REC||[]).slice();
    var out=[];
@@ -7595,7 +7617,7 @@ _WEEKLY_PRON_JS = r"""
    var host=document.getElementById('pron-weekly'); if(!host)return;
    var scores=(window.SkillStore&&window.SkillStore.get('ec_scores',{}))||{};
    // bucket every series by the Monday of its week
-   var data=[], newest='', lo=100;
+   var data=[], newest='', busy={};
    SERIES.forEach(function(s){
      var by={};
      pairs(s[0],scores).forEach(function(p){
@@ -7606,7 +7628,7 @@ _WEEKLY_PRON_JS = r"""
      Object.keys(by).forEach(function(wk){
        var v=by[wk], m=v.reduce(function(n,x){return n+x;},0)/v.length;
        avg[wk]={v:Math.round(m*10)/10, n:v.length};
-       if(avg[wk].v<lo) lo=avg[wk].v;
+       busy[wk]=(busy[wk]||0)+v.length;      // attempts that week, all series
      });
      data.push({key:s[0], label:s[1], color:s[2], avg:avg});
    });
@@ -7615,9 +7637,33 @@ _WEEKLY_PRON_JS = r"""
        "recording, or score a word in Practice single word, to start this chart.</p>";
      return;
    }
-   // the last WEEKS Mondays, ending at the most recent week that has data
-   var weeks=[], d=new Date(newest+'T12:00:00Z');
-   for(var i=0;i<WEEKS;i++){ weeks.unshift(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()-7); }
+
+   // Right edge is the week you are IN, not the newest week with data, so a
+   // silent week reads as a silent week instead of vanishing off the axis.
+   // Past TAIL weeks that stops paying: an absence long enough to fill the
+   // chart with blanks would push the history it exists to show off the left
+   // edge, so cap the empty tail and put the real length of it in words.
+   var CUR=monday(today()), gap=weeksApart(newest,CUR), last=CUR;
+   if(gap>TAIL) last=addWeeks(newest,TAIL);
+   if(newest>CUR) last=newest;              // future-dated rows / clock skew
+   // Left edge is the first week solid enough to average. Leading thin weeks
+   // are dropped; how many attempts went with them is reported, not hidden.
+   var have=Object.keys(busy).sort(), first=null, dropped=0;
+   for(var i=0;i<have.length;i++){ if(busy[have[i]]>=MIN_WEEK){ first=have[i]; break; } }
+   if(first===null) first=have[0];          // nothing solid yet — show it all
+   have.forEach(function(wk){ if(wk<first) dropped+=busy[wk]; });
+   var weeks=[], d=new Date(first+'T12:00:00Z'), stop=new Date(last+'T12:00:00Z');
+   while(d<=stop && weeks.length<WEEKS*4){
+     weeks.push(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()+7);
+   }
+   var capped=Math.max(0, weeks.length-WEEKS);
+   if(capped) weeks=weeks.slice(-WEEKS);
+   var shown={}; weeks.forEach(function(wk){ shown[wk]=1; });
+
+   // the y-range must follow what is drawn, not what was trimmed away
+   var lo=GOAL;
+   data.forEach(function(s){ weeks.forEach(function(wk){
+     if(s.avg[wk] && s.avg[wk].v<lo) lo=s.avg[wk].v; }); });
 
    var W=920,H=300,L=44,R=16,T=18,B=46, iw=W-L-R, ih=H-T-B;
    // Scores cluster high, so a 0-100 axis would flatten the trend. Zoom to the
@@ -7640,6 +7686,20 @@ _WEEKLY_PRON_JS = r"""
            "<text x='"+(L+6)+"' y='"+(y(GOAL)-6).toFixed(1)+"' fill='#ff9db0' font-size='10' "+
            "text-anchor='start'>goal "+GOAL+"</text>";
    }
+   // The week in progress is a partial average, so say so on the chart rather
+   // than letting a half-done week look like a finished one that dipped.
+   // A band, not a line: the current week is always the last column, so a rule
+   // drawn on it lands on the plot's own right edge and reads as a border.
+   if(shown[CUR]){
+     var half=(weeks.length>1 ? (x(1)-x(0))/2 : iw/2),
+         bx=Math.max(L, x(weeks.length-1)-half);
+     grid+="<rect x='"+bx.toFixed(1)+"' y='"+T+"' width='"+(W-R-bx).toFixed(1)+
+           "' height='"+ih+"' fill='#9aa3bf' opacity='.07'/>"+
+           "<line x1='"+bx.toFixed(1)+"' y1='"+T+"' x2='"+bx.toFixed(1)+"' y2='"+(T+ih)+
+           "' stroke='#9aa3bf' stroke-width='1' stroke-dasharray='3 4' opacity='.4'/>"+
+           "<text x='"+(W-R-5)+"' y='"+(T+12)+"' fill='#9aa3bf' font-size='10' "+
+           "text-anchor='end' opacity='.85'>this week so far</text>";
+   }
    var xlab='', every=Math.max(1,Math.ceil(weeks.length/12));
    weeks.forEach(function(wk,i){
      if(i%%every===0||i===weeks.length-1)
@@ -7657,15 +7717,101 @@ _WEEKLY_PRON_JS = r"""
             pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ')+"'/>";
      pts.forEach(function(p){
        svg+="<circle cx='"+p[0].toFixed(1)+"' cy='"+p[1].toFixed(1)+"' r='4' fill='"+s.color+
-            "'><title>"+s.label+" — week of "+label(p[2])+": "+p[3].v+" avg over "+
-            p[3].n+" attempt"+(p[3].n===1?'':'s')+"</title></circle>";
+            "'><title>"+s.label+" — "+span(p[2])+": "+p[3].v+" avg over "+
+            p[3].n+" attempt"+(p[3].n===1?'':'s')+
+            (p[2]===CUR?" so far — this week isn't over":"")+"</title></circle>";
      });
      legend+="<span class='lg'><i style='background:"+s.color+"'></i>"+s.label+"</span>";
    });
 
-   host.innerHTML="<svg viewBox='0 0 "+W+" "+H+"' width='100%%' style='max-width:"+W+"px'>"+
-                  grid+svg+xlab+"</svg>";
+   // Hover target: a whole column, not the 4px dot. The dot is what you aim
+   // at, but three series in one week can sit two pixels apart — asking for a
+   // dot-sized hit box means the number you want is the number you can't get.
+   // Landing anywhere in the week shows every series in it at once, which is
+   // also the comparison actually worth making.
+   var step=(weeks.length>1 ? x(1)-x(0) : iw), bands='';
+   weeks.forEach(function(wk,i){
+     // Clamp both edges, not just the left one: moving the start of the end
+     // columns inward while keeping the full width makes them overlap their
+     // neighbour, and the band painted later silently wins the hover.
+     var bx=Math.max(L, x(i)-step/2), bx2=Math.min(W-R, x(i)+step/2);
+     bands+="<rect class='pw-band' data-i='"+i+"' x='"+bx.toFixed(1)+"' y='"+T+"' width='"+
+            (bx2-bx).toFixed(1)+"' height='"+ih+"' fill='transparent' aria-hidden='true'/>";
+   });
+   // Drawn in SVG units so it needs no rescaling when the chart is responsive.
+   var hov="<line id='pw-cross' y1='"+T+"' y2='"+(T+ih)+"' x1='0' x2='0' stroke='#e8eef5' "+
+           "stroke-width='1' stroke-dasharray='2 3' opacity='0' pointer-events='none'/>"+
+           "<g id='pw-focus' pointer-events='none'></g>";
+
+   host.innerHTML="<div id='pw-wrap' style='position:relative'>"+
+     "<svg viewBox='0 0 "+W+" "+H+"' width='100%%' style='max-width:"+W+"px;display:block'>"+
+     grid+svg+xlab+hov+bands+"</svg>"+
+     // No fade: a transition only advances while the page is actually being
+     // painted, so a throttled or backgrounded tab leaves the tooltip stuck at
+     // opacity 0 with all the right content in it. Not worth 80ms of polish.
+     "<div id='pw-tip' role='status' style='position:absolute;left:0;top:0;pointer-events:none;"+
+       "opacity:0;background:#0d1a22;border:1px solid #2f5364;"+
+       "border-radius:9px;padding:8px 11px;font-size:12.5px;line-height:1.55;color:#e8eef5;"+
+       "box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap;z-index:5'></div></div>";
+
+   var wrap=document.getElementById('pw-wrap'), tip=document.getElementById('pw-tip'),
+       cross=document.getElementById('pw-cross'), focus=document.getElementById('pw-focus');
+   function place(ev){
+     var r=wrap.getBoundingClientRect(), px=ev.clientX-r.left, py=ev.clientY-r.top;
+     var tw=tip.offsetWidth, th=tip.offsetHeight;
+     var lx=px+16; if(lx+tw > r.width-4) lx=px-tw-16; if(lx<4) lx=4;
+     var ly=py-th-14; if(ly<4) ly=py+18;
+     tip.style.left=lx.toFixed(0)+'px'; tip.style.top=ly.toFixed(0)+'px';
+   }
+   function show(i, ev){
+     var wk=weeks[i], rows='', rings='';
+     data.forEach(function(s){
+       var a=s.avg[wk]; if(!a) return;
+       rows+="<div style='margin-top:4px'><span style='display:inline-block;width:9px;height:9px;"+
+             "border-radius:2px;background:"+s.color+";margin-right:7px'></span>"+s.label+
+             "  <b>"+a.v+"</b> <span style='opacity:.6'>· "+a.n+" attempt"+(a.n===1?'':'s')+
+             "</span></div>";
+       rings+="<circle cx='"+x(i).toFixed(1)+"' cy='"+y(a.v).toFixed(1)+"' r='7' fill='none' "+
+              "stroke='"+s.color+"' stroke-width='2'/>";
+     });
+     // An empty week is a real answer to "what happened here?", so say it.
+     if(!rows) rows="<div style='margin-top:4px;opacity:.65'>nothing scored this week</div>";
+     tip.innerHTML="<div style='font-weight:700'>"+span(wk)+
+       (wk===CUR?" <span style='opacity:.6;font-weight:400'>· so far</span>":"")+"</div>"+rows;
+     focus.innerHTML=rings;
+     cross.setAttribute('x1',x(i).toFixed(1)); cross.setAttribute('x2',x(i).toFixed(1));
+     cross.setAttribute('opacity','.3');
+     tip.style.opacity='1';
+     place(ev);
+   }
+   function hide(){ tip.style.opacity='0'; cross.setAttribute('opacity','0'); focus.innerHTML=''; }
+   Array.prototype.forEach.call(host.querySelectorAll('.pw-band'), function(b){
+     var i=+b.getAttribute('data-i');
+     b.addEventListener('mouseenter', function(ev){ show(i,ev); });
+     b.addEventListener('mousemove', function(ev){ place(ev); });
+   });
+   wrap.addEventListener('mouseleave', hide);
+   // A tap on a phone fires mouseenter with no reliable mouseleave to follow,
+   // which would leave the tooltip parked over a chart that is mostly tooltip
+   // at that width. Tapping anywhere else clears it.
+   document.addEventListener('pointerdown', function(ev){
+     if(!wrap.contains(ev.target)) hide();
+   }, true);
+
    var lg=document.getElementById('pron-weekly-legend'); if(lg) lg.innerHTML=legend;
+   var nt=document.getElementById('pron-weekly-note');
+   if(nt){
+     var msg = gap>0
+       ? " Nothing scored yet in the week you're in (" + span(CUR) + ")" +
+         (gap>TAIL ? ", and nothing since " + span(newest) + " — " + gap + " weeks ago." : ".")
+       : " The last column is the week you're in (" + span(CUR) +
+         "), averaged over what you've done so far.";
+     if(dropped)
+       msg += " " + dropped + " earlier attempt" + (dropped===1?"":"s") + ", before " +
+              label(first) + ", rest on too few tries to average and are left out.";
+     if(capped) msg += " Only the last " + WEEKS + " weeks are shown.";
+     nt.textContent = msg;
+   }
  });
 })();
 """
@@ -7689,13 +7835,14 @@ def _weekly_pron_section(history):
             "<p class='sub'>Every Azure-scored attempt, averaged per week. "
             "<b>Speaking</b> comes from your analyzed recordings, <b>Reading passage</b> "
             "and <b>Single word</b> from those practice panels. A missing dot is a week "
-            "with no attempts. Hover a dot for the exact average and how many attempts "
-            "it rests on.</p>"
+            "with no attempts. Hover anywhere in a week's column for every score in it "
+            "and how many attempts each one rests on.</p>"
             "<div class='chartcard'><div id='pron-weekly'></div>"
             "<div class='legend' id='pron-weekly-legend'></div></div>"
             "<p class='hint'>Read the slope, not the wobble: recording length and "
             "task difficulty move any single week, and a dot resting on 3 attempts "
-            "says far less than one resting on 300.</p>"
+            "says far less than one resting on 300."
+            "<span id='pron-weekly-note'></span></p>"
             "<script>window.PRON_WEEKLY_REC=%s;%s</script>"
             % (json.dumps(rec), _WEEKLY_PRON_JS % PRON_GOAL))
 

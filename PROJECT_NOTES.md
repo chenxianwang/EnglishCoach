@@ -327,8 +327,38 @@ persisted via the same server-side progress store, key
 - **`_windows` returns a date→window map, so `len(index)` counts days, not
   recordings.** Two recordings on one day share a key. Anything reporting a
   recording count has to iterate the items.
+- **The Summary weekly-average chart is a different animal** (`_WEEKLY_PRON_JS`,
+  `_weekly_pron_section`) and deliberately stays on **calendar** weeks: it mixes
+  three sources (`history.json` plus two `SkillStore` score prefixes) and a
+  Monday is the only boundary all three agree on. Three rules it must keep:
+  the right edge is `monday(today())`, *not* the newest week with data, so a
+  silent week shows as an empty column instead of sliding off the axis; the
+  current week is drawn while still running, shaded and labelled *this week so
+  far*, because a partial average passed off as a finished one is the one way
+  this chart can lie; and the left edge is the first week with `MIN_WEEK`
+  attempts across all series, so the trend doesn't open on a two-attempt coin
+  flip. The empty tail is capped at `TAIL` weeks — without it a long absence
+  fills all twelve columns with blanks and pushes the data it exists to show
+  off the left edge. Each of those exclusions writes its own reason into
+  `#pron-weekly-note`; the reasons are not interchangeable, so don't collapse
+  them into one sentence.
+- **Chart hover targets are column bands, never the dots** (`.pw-band`). Three
+  series in one week can land two pixels apart, so a 4px hit box means the
+  number you want is the number you can't reach; a full-height band per column
+  shows every series at once, which is the comparison worth making anyway.
+  Clamp *both* band edges at the plot bounds — clamping only the left one while
+  keeping the full width makes the end columns overlap their neighbour, and the
+  band drawn later silently wins the hover.
+- **Don't put a CSS transition on a tooltip's opacity.** A transition only
+  advances while the page is being painted, so a throttled or backgrounded tab
+  leaves the tooltip at `opacity:0` with the correct content and position in it
+  — invisible, and impossible to spot in a static screenshot test. Set opacity
+  outright.
+- **Use the local date, not `toISOString()`, for "today"** in any chart JS.
+  UTC is a day behind Asia/Shanghai all evening, which lands "this week" in the
+  previous one every Monday.
 - **`_GRAMMAR_JS` is substituted with `%s`, not `%`-formatted** — so a literal
-  `%` inside it stays a single `%`. The opposite of `_PRON_WEEKLY_JS` and the
+  `%` inside it stays a single `%`. The opposite of `_WEEKLY_PRON_JS` and the
   other panel templates, where `%` must be doubled. Getting this backwards
   renders `100%%` into the page or blows up the whole panel with "not enough
   arguments for format string".

@@ -608,6 +608,28 @@ improvement curve across pronunciation, accuracy, fluency, and prosody, plus
 recurring blind spots aggregated across recordings and a per-word score history
 for the drill list.
 
+**Average pronunciation score by week** leads the page, because the
+per-recording curve below it moves with recording length and task difficulty —
+one short or hard session reads as a slump. Averaging every Azure-scored
+attempt over a calendar week, across recordings and drills alike, is what
+actually shows a trend.
+
+Three rules keep that chart honest:
+
+- **The right edge is the week you are in, not your newest data.** The current
+  week is averaged and plotted while it is still running, shaded and labelled
+  *this week so far* so a partial average is never mistaken for a finished one.
+  If you haven't scored anything yet this week, the column is there and empty,
+  and the note says so — a silent week should look silent, not disappear.
+- **The chart opens on the first week solid enough to average.** A week resting
+  on one or two attempts is a coin flip, and putting it first starts the whole
+  trend from noise. Leading thin weeks are dropped and the note reports how
+  many attempts went with them. Only the lead-in: an interior thin week stays,
+  because a dip between two real measurements means something.
+- **A long absence can't push your history off the axis.** The empty tail is
+  capped at four weeks, after which the note gives the real length of the gap
+  in words rather than filling the chart with blank columns.
+
 Time on task is tracked too, measured from the actual length of every analyzed
 recording and bucketed by day, week, or month. Empty periods are drawn as
 zero-height stubs rather than skipped, so a gap reads as a day you didn't
