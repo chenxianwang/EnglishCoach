@@ -342,6 +342,20 @@ persisted via the same server-side progress store, key
   off the left edge. Each of those exclusions writes its own reason into
   `#pron-weekly-note`; the reasons are not interchangeable, so don't collapse
   them into one sentence.
+- **The per-recording word list is gone on purpose** (removed 2026-08-09). The
+  Azure block used to end with a "Word errors" filter row, every word of the
+  transcript as a pill, and a "Prosody / delivery" percentage strip. In practice
+  the pill list was ~50 chips each suffixed with the same word — filtering to
+  Mispronunciation made every chip read `x · Mispronunciation` — and the prosody
+  strip sat at 0%/0%/10% most runs. What survives is the ring plus the four
+  score bars; the rates that replaced it live in Speaking error log → Error
+  stats. Three things went with it, so don't be surprised: the invisible
+  `<audio class='rec-audio'>` (it had no `controls`, it existed only for
+  click-a-word-to-seek), **all playback of your own recordings anywhere in the
+  app**, and the blind-spot chips' jump for `kind='word'`, which navigated by
+  finding a matching pill. Those chips are now `nojump` — inert but honest,
+  rather than advertising a jump that silently fails. `.wpill`/`.words` CSS
+  stays: the error-stats examples and the dictation skip list still use it.
 - **Chart hover targets are column bands, never the dots** (`.pw-band`). Three
   series in one week can land two pixels apart, so a 4px hit box means the
   number you want is the number you can't reach; a full-height band per column

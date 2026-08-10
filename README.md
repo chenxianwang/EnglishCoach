@@ -156,8 +156,9 @@ box empty to fall back to the built-in default.
 Recordings accumulate — a year of them is mostly media, not results. The
 Setting Panel has a storage card that deletes the audio and video while keeping
 every generated result, so old sessions stay in the reports, the vocabulary
-counts and the progress curve with only the playback gone. Anything that hasn't
-been analyzed yet is never touched, since deleting it would lose the only copy.
+counts and the progress curve — the media file itself is all that goes. Anything
+that hasn't been analyzed yet is never touched, since deleting it would lose the
+only copy.
 Duration and recording time are stamped into each `.result.json` while the media
 is still present, which is what makes the file self-sufficient afterward.
 

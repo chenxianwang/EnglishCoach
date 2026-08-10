@@ -38,7 +38,6 @@ import os
 import re
 import sys
 from datetime import date, datetime, timedelta
-from urllib.parse import quote
 
 
 # ---------------------------------------------------------------------------
@@ -1552,11 +1551,6 @@ def _attr(x):
     return html.escape(str(x), quote=True)
 
 
-def _media_src(rel):
-    """URL-encode a relative media path for an <audio src> (keeps slashes)."""
-    return quote(rel.replace(os.sep, "/"), safe="/")
-
-
 def _rows(items, cols):
     out = []
     for it in items:
@@ -1743,63 +1737,6 @@ def _report_body(d):
         bars = (bar("Accuracy", az["accuracy"]) + bar("Fluency", az["fluency"])
                 + bar("Completeness", az["completeness"])
                 + bar("Prosody", az["prosody"]))
-        err_color = {k: bg for k, _, bg, _ in AZURE_ERROR_CATS}
-        err_color["Low"] = "#e07b39"
-        pills = []
-        # Without the audio there is nothing to seek into, so don't dress the
-        # words up as clickable — a pill that highlights on hover and then does
-        # nothing reads as a bug.
-        playable = bool(d.get("audio_rel"))
-        for x in az.get("words", []):
-            e = x.get("error", "")
-            t = x.get("t")
-            ta = (" data-t='%s'" % t) if t is not None else ""
-            sk = " seek" if (t is not None and playable) else ""
-            if e:
-                c = err_color.get(e, "#ff6b6b")
-                pills.append(
-                    "<span class='wpill%s' data-err='%s'%s style='color:%s;background:%s22;"
-                    "border:1px solid %s55'>%s &middot; %s</span>"
-                    % (sk, _esc(e), ta, c, c, c, _esc(x["word"]), _esc(e)))
-            else:
-                pills.append("<span class='wpill%s' data-err=''%s>%s</span>"
-                             % (sk, ta, _esc(x["word"])))
-        errs = "".join(pills)
-        audio_el = ""
-        if playable:
-            audio_el = ("<audio class='rec-audio' src='%s' preload='none'></audio>"
-                        "<p class='hint'>🔊 Click any word below to hear that moment "
-                        "in your recording.</p>" % _media_src(d["audio_rel"]))
-        else:
-            audio_el = ("<p class='hint'>🗄 The audio for this recording has been "
-                        "removed to free up space. Every score, the transcript and "
-                        "the word-level detail below are kept — only playback is "
-                        "gone.</p>")
-        ec_counts = az.get("error_counts", {})
-        total_words = max(1, len(az.get("words", [])))
-        # word-level mistakes (first three) vs prosody/delivery (last three)
-        word_cats = AZURE_ERROR_CATS[:3]
-        pros_cats = AZURE_ERROR_CATS[3:]
-
-        def _chip(key, label, bg, fg):
-            n = ec_counts.get(key, 0)
-            cls = "errc clickable" if n else "errc"
-            return ("<div class='%s' data-filter='%s'>"
-                    "<b style='background:%s;color:%s'>%s</b>%s</div>"
-                    % (cls, key, bg, fg, n, label))
-
-        def _proschip(key, label, bg, fg):
-            n = ec_counts.get(key, 0)
-            pct = round(100 * n / total_words)
-            return ("<div class='errc' title='%s of %s words'>"
-                    "<b style='background:%s;color:%s'>%s%%</b>%s</div>"
-                    % (n, total_words, bg, fg, pct, label))
-
-        word_chips = ("<div class='errc clickable allchip active' data-filter='*'>"
-                      "<b style='background:#2c4a58;color:#fff'>↺</b>Show all</div>"
-                      + "".join(_chip(*c) for c in word_cats))
-        pros_chips = "".join(_proschip(*c) for c in pros_cats)
-
         strict_tag = ""
         if az.get("strictness") and az["strictness"] != "standard":
             strict_tag = (" <span class='score'>· %s grading</span>"
@@ -1818,15 +1755,7 @@ def _report_body(d):
             "<h2>Pronunciation score (Azure)%s</h2>%s"
             "<div class='azwrap'><div class='ring' style='%s'><b>%s</b><small>overall</small></div>"
             "<div class='bars'>%s</div></div>"
-            "%s"
-            "<p class='score'>Word errors <span class='hint'>— click a type to "
-            "see those words</span></p><div class='errgrid'>%s</div>"
-            "<div class='words'>%s</div>"
-            "<p class='score'>Prosody / delivery <span class='hint'>— share of words "
-            "flagged for flat intonation or pausing, not word mistakes</span></p>"
-            "<div class='errgrid'>%s</div>"
-            % (strict_tag, warn_html, ring_style, az["pron_score"], bars,
-               audio_el, word_chips, errs, pros_chips)
+            % (strict_tag, warn_html, ring_style, az["pron_score"], bars)
         )
 
     if not az and d.get("azure_note"):
@@ -2010,9 +1939,13 @@ _DASHBOARD_CSS = """
   .sb-h{display:flex;justify-content:space-between;font-size:14px;color:var(--mut)}
   .sb-t{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:3px}
   .sb-f{height:100%;background:var(--good)}
+  /* .words and .wpill outlived the per-recording word list they were built
+     for -- the error-stats examples and the dictation skip list use them. */
   .words{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .wpill{font-size:13px;padding:3px 8px;border-radius:6px;background:#1f3542;color:var(--mut)}
   .wpill.bad{background:#3a2029;color:var(--bad)}
+  .wpill.seek{cursor:pointer}
+  .wpill.seek:hover{filter:brightness(1.25);outline:1px solid var(--accent)}
   /* Error-stats rows. The bar is deliberately relative to YOUR average, not to
      a fixed 0-100 -- an 8% failure rate means nothing until you know whether
      your own baseline is 3% or 20%. The tick marks where average sits. */
@@ -2031,19 +1964,6 @@ _DASHBOARD_CSS = """
   .esbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;
            border-radius:999px;background:#1f3542;color:var(--mut);margin-left:8px}
   .esbadge.exact{background:rgba(67,197,158,.18);color:var(--good)}
-  .errgrid{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 4px}
-  .errc{display:flex;align-items:center;gap:8px;background:#1f3542;
-        padding:6px 12px 6px 6px;border-radius:10px;font-size:14px;color:var(--ink)}
-  .errc b{display:inline-block;min-width:24px;text-align:center;padding:3px 6px;
-          border-radius:7px;font-weight:800}
-  .errc.clickable{cursor:pointer;transition:transform .05s}
-  .errc.clickable:hover{transform:translateY(-1px)}
-  .errc.active{outline:2px solid var(--accent);outline-offset:1px}
-  .wpill.hide{display:none}
-  .wpill.seek{cursor:pointer}
-  .wpill.seek:hover{filter:brightness(1.25);outline:1px solid var(--accent)}
-  .wpill.playing{outline:2px solid var(--accent);outline-offset:1px}
-  .rec-audio{width:100%;margin:6px 0 2px}
   .hint{color:var(--mut);font-weight:400;font-size:13px}
   .btn{font-size:14px;padding:8px 14px;border-radius:9px;border:0;cursor:pointer;
        background:var(--accent);color:#08222b;font-weight:700;margin-right:8px}
@@ -2057,6 +1977,9 @@ _DASHBOARD_CSS = """
   .chip.up{color:var(--good)}.chip.down{color:var(--bad)}
   .bschip{cursor:pointer;display:inline-flex;align-items:center;gap:6px}
   .bschip:hover{outline:1px solid var(--accent)}
+  /* nothing to jump to, so don't look clickable -- the ✓ inside still is */
+  .bschip.nojump{cursor:default}
+  .bschip.nojump:hover{outline:0}
   .bschip.mastered{opacity:.45;text-decoration:line-through}
   .masterbtn{border:0;border-radius:50%;width:18px;height:18px;line-height:1;
        cursor:pointer;background:#24404c;color:#9aa3bf;font-size:11px;padding:0}
@@ -2118,35 +2041,6 @@ _DASHBOARD_JS = """
   var _navlinks=document.querySelectorAll('.sidenav a');
   for(var n=0;n<_navlinks.length;n++){ _navlinks[n].addEventListener('click', function(){
     var s=document.querySelector('.sidenav'); if(s.classList.contains('open')) toggleNav(); }); }
-  // click an error chip to filter that recording's word list
-  document.addEventListener('click', function(e){
-    var chip = e.target.closest ? e.target.closest('.errc.clickable') : null;
-    if(!chip) return;
-    var panel = chip.closest('.tabpanel') || document;
-    var filter = chip.getAttribute('data-filter');
-    var chips = panel.querySelectorAll('.errc');
-    for(var i=0;i<chips.length;i++) chips[i].classList.remove('active');
-    chip.classList.add('active');
-    var pills = panel.querySelectorAll('.wpill');
-    for(var j=0;j<pills.length;j++){
-      var show = (filter==='*') || (pills[j].getAttribute('data-err')===filter);
-      pills[j].classList.toggle('hide', !show);
-    }
-  });
-  // click a word to hear that exact moment in the recording
-  document.addEventListener('click', function(e){
-    var pill = e.target.closest ? e.target.closest('.wpill.seek') : null;
-    if(!pill) return;
-    var panel = pill.closest('.tabpanel') || document;
-    var au = panel.querySelector('.rec-audio');
-    if(!au) return;
-    var t = parseFloat(pill.getAttribute('data-t'));
-    if(isNaN(t)) return;
-    try{ au.currentTime = Math.max(0, t-0.15); au.play(); }catch(_){}
-    var prev = panel.querySelector('.wpill.playing'); if(prev) prev.classList.remove('playing');
-    pill.classList.add('playing');
-    setTimeout(function(){ pill.classList.remove('playing'); }, 1200);
-  });
   // shadowing: read the polished text aloud with the browser's TTS
   function shadowSpeak(btn){
     var panel = btn.closest('.tabpanel') || document;
@@ -2222,28 +2116,19 @@ _DASHBOARD_JS = """
   document.addEventListener('click', function(e){
     var chip=e.target.closest ? e.target.closest('.bschip') : null;
     if(!chip || (e.target && e.target.classList.contains('masterbtn'))) return;
-    var kind=chip.getAttribute('data-kind');
+    if(chip.classList.contains('nojump')) return;   // no target to scroll to
     var key=(chip.getAttribute('data-key')||'').trim().toLowerCase();
     var recs=document.querySelectorAll(\"section.tabpanel[id^='rec']\");
     for(var i=0;i<recs.length;i++){
       var panel=recs[i], hit=null;
-      if(kind==='word'){
-        var pills=panel.querySelectorAll(\".wpill[data-err='Mispronunciation']\");
-        for(var p=0;p<pills.length;p++){
-          var t=(pills[p].textContent.split('·')[0]||'').trim().toLowerCase();
-          if(t===key){ hit=pills[p]; break; }
-        }
-      } else {
-        var cells=panel.querySelectorAll('td');
-        for(var c=0;c<cells.length;c++){
-          if((cells[c].textContent||'').trim().toLowerCase()===key){ hit=cells[c]; break; }
-        }
+      var cells=panel.querySelectorAll('td');
+      for(var c=0;c<cells.length;c++){
+        if((cells[c].textContent||'').trim().toLowerCase()===key){ hit=cells[c]; break; }
       }
       if(hit){
         showPanel(panel.id);
         setTimeout(function(el){return function(){
           el.scrollIntoView({behavior:'smooth',block:'center'}); _flash(el);
-          if(el.classList && el.classList.contains('seek')) el.click();
         };}(hit), 60);
         return;
       }
@@ -8111,14 +7996,21 @@ def _blind_spots(items):
         if not counter:
             return "<p class='hint'>Nothing recurring yet — analyze a few recordings.</p>"
         out = []
+        # Word-choice chips still land on a row in the Word choice table. Word
+        # chips used to land on a pill in the per-recording word list, and that
+        # list is gone — so they no longer offer a jump rather than offering
+        # one that quietly does nothing. The ✓ still works on both.
+        jump = kind != "word"
         for k, n in counter.most_common(8):
             cid = kind + ":" + k
             out.append(
-                "<span class='chip bschip' data-kind='%s' data-key=\"%s\" data-id=\"%s\" "
-                "title='Click to find it in a recording' style='color:%s'>"
+                "<span class='chip bschip%s' data-kind='%s' data-key=\"%s\" data-id=\"%s\" "
+                "%sstyle='color:%s'>"
                 "%s · %d×<button class='masterbtn' title='Toggle mastered' "
                 "onclick='toggleMaster(event,this)'>✓</button></span>"
-                % (kind, _attr(k), _attr(cid), color, _esc(k), n))
+                % ("" if jump else " nojump", kind, _attr(k), _attr(cid),
+                   "title='Click to find it in a recording' " if jump else "",
+                   color, _esc(k), n))
         return "".join(out)
     # Grammar mistakes are consolidated in the Grammar module (the error log),
     # so we no longer duplicate them here — just point to it.
@@ -8134,7 +8026,8 @@ def _blind_spots(items):
              % (chips(words, "#ff6b6b", "word"), chips(choices, "#ffb454", "note")))
     return ("<h2>Your recurring blind spots</h2>"
             "<p class='sub'>Sound and word-choice patterns from your recordings — "
-            "click any chip to jump to where it happened, or mark it mastered.</p>"
+            "mark one mastered with ✓, or click a word-choice chip to jump to "
+            "where it happened.</p>"
             "<div class='bsfilter'>"
             "<button class='btn small active' data-f='all' onclick='bsFilter(this)'>All</button>"
             "<button class='btn small' data-f='active' onclick='bsFilter(this)'>Active</button>"
