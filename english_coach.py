@@ -6077,6 +6077,342 @@ def _knowledge_panel():
                chips(stops), chips(fric), chips(affr), chips(nas), chips(appr)))
 
 
+# -ed verbs, grouped by which of the three endings the base verb forces. The
+# base form is carried alongside so the contrast drill can play "ask" and
+# "asked" back to back — hearing the pair is what makes the ending audible.
+_ED_ID = [("wanted", "/ˈwɒntɪd/", "want"), ("needed", "/ˈniːdɪd/", "need"),
+          ("started", "/ˈstɑːtɪd/", "start"), ("decided", "/dɪˈsaɪdɪd/", "decide"),
+          ("waited", "/ˈweɪtɪd/", "wait"), ("ended", "/ˈendɪd/", "end"),
+          ("visited", "/ˈvɪzɪtɪd/", "visit"), ("counted", "/ˈkaʊntɪd/", "count")]
+_ED_T = [("stopped", "/stɒpt/", "stop"), ("asked", "/ɑːskt/", "ask"),
+         ("walked", "/wɔːkt/", "walk"), ("laughed", "/lɑːft/", "laugh"),
+         ("missed", "/mɪst/", "miss"), ("washed", "/wɒʃt/", "wash"),
+         ("watched", "/wɒtʃt/", "watch"), ("finished", "/ˈfɪnɪʃt/", "finish")]
+_ED_D = [("played", "/pleɪd/", "play"), ("called", "/kɔːld/", "call"),
+         ("loved", "/lʌvd/", "love"), ("opened", "/ˈəʊpənd/", "open"),
+         ("changed", "/tʃeɪndʒd/", "change"), ("listened", "/ˈlɪsənd/", "listen"),
+         ("moved", "/muːvd/", "move"), ("learned", "/lɜːnd/", "learn")]
+
+# Same spelling, /ɪd/ anyway — these are adjectives, not past tenses, so the
+# voicing rule never applies to them.
+_ED_ADJ = [("aged", "/ˈeɪdʒɪd/", "an aged whisky"),
+           ("blessed", "/ˈblesɪd/", "a blessed relief"),
+           ("learned", "/ˈlɜːnɪd/", "a learned professor"),
+           ("beloved", "/bɪˈlʌvɪd/", "her beloved dog"),
+           ("wicked", "/ˈwɪkɪd/", "a wicked sense of humour"),
+           ("naked", "/ˈneɪkɪd/", "the naked eye"),
+           ("crooked", "/ˈkrʊkɪd/", "a crooked smile"),
+           ("ragged", "/ˈrægɪd/", "a ragged edge")]
+
+
+def _ed_panel():
+    """Reference for the three sounds of past-tense -ed.
+
+    Deliberately a *reference* page, not a drill: the point is that the choice
+    is not a choice at all — it falls out of the voicing of the sound before
+    it. Every word is tappable, because this is one you have to hear.
+    """
+    def chip(word, ipa, rate=""):
+        return ("<button class='btn small' data-say=\"" + _attr(word) + "\""
+                + (" data-rate='" + rate + "'" if rate else "")
+                + ">" + _esc(word) + " <span class='hint'>" + _esc(ipa)
+                + "</span></button>")
+
+    def row(items):
+        return ("<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+                + " ".join(chip(w, i) for w, i, _b in items) + "</div>")
+
+    def pairs(items):
+        # base then past, side by side — the only difference is the ending
+        out = []
+        for word, ipa, base in items:
+            out.append("<div style='display:flex;align-items:center;gap:6px'>"
+                       + "<button class='btn small' data-say=\"" + _attr(base)
+                       + "\">" + _esc(base) + "</button>"
+                       + "<span class='hint'>→</span>" + chip(word, ipa) + "</div>")
+        return ("<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:8px'>"
+                + "".join(out) + "</div>")
+
+    return (
+        "<section id='edsound' class='tabpanel hidden'>"
+        "<h1>‑ed — how the past tense actually sounds</h1>"
+        "<p class='sub'>One spelling, three sounds. Which one you get is decided by the "
+        "sound <i>before</i> it — never by the letter, and never by choice. "
+        "Tap anything on this page to hear it.</p>"
+
+        "<h2>The one rule</h2>"
+        "<div class='card'><p>Look at the <b>last sound</b> of the base verb — not the last "
+        "letter, and not the spelling:</p>"
+        "<p>• it ends in <b>/t/ or /d/</b> → ‑ed is <b>/ɪd/</b>, and the word gains a syllable<br>"
+        "• it ends in any other <b>voiceless</b> sound → ‑ed is <b>/t/</b><br>"
+        "• it ends in any other <b>voiced</b> sound, including every vowel → ‑ed is <b>/d/</b></p>"
+        "<p class='hint'>Voiced means the throat buzz is on. Same dial as in "
+        "<b>Vowels &amp; consonants 101</b> — put your fingers on your throat and say ffff / vvvv.</p>"
+        "</div>"
+
+        "<h2>1 · /ɪd/ — the only one that adds a syllable</h2>"
+        "<div class='card'><p>After <b>/t/</b> or <b>/d/</b>. You physically cannot say /t/+/t/ or "
+        "/d/+/d/ without a vowel between them, so one appears. <b>want</b> is one syllable; "
+        "<b>wanted</b> is two.</p>"
+        + row(_ED_ID) +
+        "</div>"
+
+        "<h2>2 · /t/ — after a voiceless sound</h2>"
+        "<div class='card'><p>After <b>/p k f s ʃ tʃ θ/</b>. <b>No extra syllable</b> — "
+        "<b>stopped</b> is still one, and there is no vowel in the ending at all: /stɒpt/. "
+        "The spelling is lying to you.</p>"
+        + row(_ED_T) +
+        "</div>"
+
+        "<h2>3 · /d/ — after a voiced sound</h2>"
+        "<div class='card'><p>After every vowel, and after <b>/b g v ð z ʒ dʒ m n ŋ l r/</b>. "
+        "No extra syllable either.</p>"
+        + row(_ED_D) +
+        "</div>"
+
+        "<h2>Why you don't actually have to memorise this</h2>"
+        "<div class='card'><p>Your mouth already does it. Voicing simply <b>carries over</b>: if "
+        "your voice is on at the end of the base verb, it stays on and you get /d/; if it's off, "
+        "it stays off and you get /t/. Nobody chooses.</p>"
+        "<p>Test it — hum continuously through <b>called</b>: the buzz never stops. Now try "
+        "<b>asked</b>: the buzz dies on the /k/ and never comes back. That is the whole rule, "
+        "and it is doing itself.</p>"
+        "<p>So the three lists above are not three things to learn. They are one thing — "
+        "<i>keep your voicing consistent</i> — described three ways.</p></div>"
+
+        "<h2>The two traps for a Mandarin speaker</h2>"
+        "<div class='card'><p><b>1 · Adding a syllable everywhere.</b> "
+        "<b>walked</b> is /wɔːkt/ — <i>one</i> syllable, not “walk‑ed”. Mandarin syllables end in a "
+        "vowel, /n/ or /ŋ/, so a final cluster like /kt/ feels impossible and a helper vowel sneaks "
+        "in. Only the /t/‑ and /d/‑final verbs in list 1 get the extra syllable — everything else "
+        "keeps its original count.</p>"
+        "<p><b>2 · Dropping it entirely.</b> /kt/, /pt/, /st/, /ʃt/ are genuinely hard clusters, and "
+        "the easy escape is to leave the ending off. But then the past tense <i>disappears</i> and "
+        "your listener hears the present. This is one of the most common tense errors in the "
+        "<b>Speaking error log</b> — and it is a pronunciation problem wearing a grammar costume: "
+        "you know the rule, the cluster just didn't survive.</p>"
+        "<p class='hint'>Both traps have the same fix — finish the cluster, don't pad it.</p></div>"
+
+        "<h2>Hear the difference</h2>"
+        "<div class='card'><p>Base form, then past. The ending is the only thing that changes — "
+        "if the two sound identical when you say them, the ending isn't landing.</p>"
+        + pairs(_ED_T[:4] + _ED_D[:2] + _ED_ID[:2]) +
+        "</div>"
+
+        "<h2>The exceptions — and they're all adjectives</h2>"
+        "<div class='card'><p>A short list of ‑ed words keep an old /ɪd/ pronunciation when they act "
+        "as <b>adjectives</b>, breaking the rule above. As verbs they behave normally:</p>"
+        "<p><b>learned</b> — “I <b>learned</b> it” /lɜːnd/ &nbsp;·&nbsp; "
+        "“a <b>learned</b> professor” /ˈlɜːnɪd/</p>"
+        + "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+        + " ".join("<button class='btn small' data-say=\"" + _attr(ex) + "\">"
+                   + _esc(w) + " <span class='hint'>" + _esc(ipa) + "</span></button>"
+                   for w, ipa, ex in _ED_ADJ)
+        + "</div>"
+        "<p class='hint' style='margin-top:10px'>These are worth knowing but not worth drilling — "
+        "you will meet most of them in reading long before you need to say them.</p></div>"
+
+        "<h2>One more pair to watch</h2>"
+        "<div class='card'><p><b>used</b> is voiced or voiceless depending on what it means:</p>"
+        "<p>• “I <b>used</b> the app” — /juːzd/, voiced, a normal past tense<br>"
+        "• “I <b>used to</b> swim” — /juːst/, voiceless, the habit construction</p>"
+        + "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+        + chip("I used the app", "/juːzd/") + " " + chip("I used to swim", "/juːst/")
+        + "</div></div>"
+        "</section>")
+
+
+# -s words, grouped the same way -ed is: by what the sound before the ending
+# forces. Base carried alongside for the same reason -- "dog" then "dogs" back
+# to back is the only way the /z/ becomes audible.
+_S_IZ = [("buses", "/ˈbʌsɪz/", "bus"), ("watches", "/ˈwɒtʃɪz/", "watch"),
+         ("boxes", "/ˈbɒksɪz/", "box"), ("changes", "/ˈtʃeɪndʒɪz/", "change"),
+         ("wishes", "/ˈwɪʃɪz/", "wish"), ("pages", "/ˈpeɪdʒɪz/", "page"),
+         ("prices", "/ˈpraɪsɪz/", "price"), ("judges", "/ˈdʒʌdʒɪz/", "judge")]
+_S_S = [("books", "/bʊks/", "book"), ("cats", "/kæts/", "cat"),
+        ("stops", "/stɒps/", "stop"), ("laughs", "/lɑːfs/", "laugh"),
+        ("months", "/mʌnθs/", "month"), ("hopes", "/həʊps/", "hope"),
+        ("hits", "/hɪts/", "hit"), ("works", "/wɜːks/", "work")]
+_S_Z = [("dogs", "/dɒɡz/", "dog"), ("plays", "/pleɪz/", "play"),
+        ("comes", "/kʌmz/", "come"), ("needs", "/niːdz/", "need"),
+        ("things", "/θɪŋz/", "thing"), ("lives", "/lɪvz/", "live"),
+        ("cars", "/kɑːz/", "car"), ("calls", "/kɔːlz/", "call")]
+
+# The base itself changes before the ending goes on, so "look at the last sound"
+# gives the wrong answer unless you look at the *changed* last sound.
+_S_VOICE = [("houses", "/ˈhaʊzɪz/", "house"), ("wives", "/waɪvz/", "wife"),
+            ("knives", "/naɪvz/", "knife"), ("leaves", "/liːvz/", "leaf"),
+            ("halves", "/hɑːvz/", "half"), ("lives", "/laɪvz/", "life")]
+
+# /s/ or /z/ is the only thing separating these -- worth an ear, not a rule.
+_S_PAIRS = [("price", "/praɪs/", "prize", "/praɪz/"),
+            ("loose", "/luːs/", "lose", "/luːz/"),
+            ("ice", "/aɪs/", "eyes", "/aɪz/"),
+            ("bus", "/bʌs/", "buzz", "/bʌz/"),
+            ("peace", "/piːs/", "peas", "/piːz/")]
+
+
+def _s_panel():
+    """Reference for the three sounds of the -s ending.
+
+    Sibling of the -ed page, and written to be read after it, because it is
+    literally the same rule running on a different ending: voicing carries over
+    from whatever came before. Saying so is the whole pedagogical point -- two
+    endings, one mechanism, nothing new to memorise.
+    """
+    def chip(word, ipa):
+        return ("<button class='btn small' data-say=\"" + _attr(word) + "\">"
+                + _esc(word) + " <span class='hint'>" + _esc(ipa)
+                + "</span></button>")
+
+    def row(items):
+        return ("<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+                + " ".join(chip(w, i) for w, i, _b in items) + "</div>")
+
+    def pairs(items):
+        # singular then plural — the ending is the only difference
+        return ("<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:8px'>"
+                + "".join("<div style='display:flex;align-items:center;gap:6px'>"
+                          + "<button class='btn small' data-say=\"" + _attr(base)
+                          + "\">" + _esc(base) + "</button>"
+                          + "<span class='hint'>→</span>" + chip(word, ipa) + "</div>"
+                          for word, ipa, base in items)
+                + "</div>")
+
+    def contrast(items):
+        # two different words, not two forms of one — the ending is the word
+        return ("<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:8px'>"
+                + "".join("<div style='display:flex;align-items:center;gap:6px'>"
+                          + chip(a, ai) + "<span class='hint'>vs</span>" + chip(b, bi)
+                          + "</div>" for a, ai, b, bi in items)
+                + "</div>")
+
+    return (
+        "<section id='ssound' class='tabpanel hidden'>"
+        "<h1>‑s — /s/, /z/ or /ɪz/</h1>"
+        "<p class='sub'>The plural, the third‑person verb, the possessive and the "
+        "contraction of <i>is</i>/<i>has</i> are all the same ending, and it has three "
+        "sounds. If you have read the <b>‑ed</b> page you already know the rule — it is "
+        "the same rule. Tap anything here to hear it.</p>"
+
+        "<h2>The one rule — and you have met it before</h2>"
+        "<div class='card'><p>Look at the <b>last sound</b> of the word the ending goes "
+        "onto — not the last letter:</p>"
+        "<p>• it ends in a <b>hissing/buzzing</b> sound — <b>/s z ʃ ʒ tʃ dʒ/</b> → ‑s is "
+        "<b>/ɪz/</b>, and the word gains a syllable<br>"
+        "• it ends in any other <b>voiceless</b> sound → ‑s is <b>/s/</b><br>"
+        "• it ends in any other <b>voiced</b> sound, including every vowel → ‑s is "
+        "<b>/z/</b></p>"
+        "<p class='hint'>Compare with ‑ed: after /t d/ you get /ɪd/, voiceless gives /t/, "
+        "voiced gives /d/. Identical shape. Both endings simply keep your voicing switched "
+        "the way it already was — the only difference is which sounds are “too similar” to "
+        "sit next to the ending, and so force the extra vowel.</p>"
+        "</div>"
+
+        "<h2>1 · /ɪz/ — the only one that adds a syllable</h2>"
+        "<div class='card'><p>After <b>/s z ʃ ʒ tʃ dʒ/</b> — the sibilants. You cannot hear "
+        "an /s/ or /z/ stuck onto another /s/ or /z/, so a vowel appears to keep them apart. "
+        "<b>box</b> is one syllable; <b>boxes</b> is two.</p>"
+        + row(_S_IZ) +
+        "<p class='hint' style='margin-top:10px'>This is the one group where the spelling "
+        "helps you: an extra <b>e</b> usually appears too (box → box<b>e</b>s).</p>"
+        "</div>"
+
+        "<h2>2 · /s/ — after a voiceless sound</h2>"
+        "<div class='card'><p>After <b>/p t k f θ/</b>. <b>No extra syllable.</b> "
+        "<b>books</b> is /bʊks/, one beat, ending in a cluster.</p>"
+        + row(_S_S) +
+        "</div>"
+
+        "<h2>3 · /z/ — after a voiced sound</h2>"
+        "<div class='card'><p>After every vowel, and after <b>/b d ɡ v ð m n ŋ l r/</b>. "
+        "No extra syllable. <b>This is the most common of the three by a wide margin</b> — "
+        "most English words end in a vowel or a voiced consonant, so if you are unsure, "
+        "<b>/z/</b> is the better guess.</p>"
+        + row(_S_Z) +
+        "</div>"
+
+        "<h2>The trap that matters most for you: English has a /z/</h2>"
+        "<div class='card'><p>Mandarin has no <b>/z/</b> at all. Pinyin <i>z</i> is /ts/ — a "
+        "different sound entirely — so there is no habit to fall back on, and the ending "
+        "quietly hardens into /s/. <b>dogs</b> becomes “docks”, <b>needs</b> becomes “neats”, "
+        "<b>plays</b> becomes “place”.</p>"
+        "<p>Find it with your hand: say a long <b>sssss</b>, then without stopping the air "
+        "switch the voice on — <b>zzzzz</b>. Fingers on the throat, the buzz arrives. That "
+        "buzz has to survive all the way to the end of <b>dogs</b>.</p>"
+        "<p class='hint'>Same diagnostic as the ‑ed page: hum continuously through "
+        "<b>calls</b> and the buzz never stops. Hum through <b>works</b> and it dies on the "
+        "/k/ — correctly, this time.</p></div>"
+
+        "<h2>The other two traps</h2>"
+        "<div class='card'><p><b>1 · Adding a syllable.</b> <b>books</b> is /bʊks/, not "
+        "“book‑uh‑s”. Mandarin syllables end in a vowel, /n/ or /ŋ/, so /ks/, /ts/, /ps/ feel "
+        "impossible and a helper vowel sneaks in. Only the sibilant group in list 1 earns "
+        "the extra syllable.</p>"
+        "<p><b>2 · Dropping it entirely.</b> The easier escape, and the more expensive one. "
+        "Drop it on a noun and the plural disappears; drop it on a verb and "
+        "subject‑verb agreement disappears — <i>“my group of stones are safe”</i> and "
+        "<i>“he play well”</i> are the same failure wearing two different grammar "
+        "costumes. Your <b>Speaking error log</b> counts these as grammar errors, but a "
+        "good share of them are this cluster not surviving.</p>"
+        "<p class='hint'>Both traps have the same fix as ‑ed — finish the cluster, don't pad "
+        "it.</p></div>"
+
+        "<h2>Hear the difference</h2>"
+        "<div class='card'><p>Singular, then plural. The ending is the only thing that "
+        "changes — if the two sound the same when you say them, it isn't landing.</p>"
+        + pairs(_S_S[:3] + _S_Z[:3] + _S_IZ[:2]) +
+        "</div>"
+
+        "<h2>When /s/ or /z/ <i>is</i> the word</h2>"
+        "<div class='card'><p>These are not endings at all — different words that differ "
+        "only in the voicing of the final sound. Worth an ear rather than a rule, and a good "
+        "check on whether your /z/ is really arriving:</p>"
+        + contrast(_S_PAIRS) +
+        "<p class='hint' style='margin-top:10px'>The same alternation marks noun from verb "
+        "in a few pairs: <b>use</b> /juːs/ the noun vs /juːz/ the verb, <b>close</b> /kləʊs/ "
+        "the adjective vs /kləʊz/ the verb, <b>house</b> /haʊs/ the noun vs /haʊz/ the "
+        "verb.</p></div>"
+
+        "<h2>The exceptions — where the base changes first</h2>"
+        "<div class='card'><p>In a small group the final sound of the base <b>voices</b> "
+        "before the ending goes on, so the rule still works — it just has to be applied to "
+        "the changed sound, not the one you see:</p>"
+        "<p><b>house</b> /haʊs/ → <b>houses</b> /ˈhaʊzɪz/, not “/ˈhaʊsɪz/”. The /s/ has "
+        "already become /z/.</p>"
+        + row(_S_VOICE) +
+        "<p class='hint' style='margin-top:10px'><b>lives</b> is on this page twice and "
+        "both are right: /lɪvz/ is the verb (“he <b>lives</b> here”), /laɪvz/ is the plural "
+        "of <i>life</i>. Same spelling, different vowel — but the ending is /z/ either "
+        "way.</p>"
+        "<p style='margin-top:12px'>Two more that change the vowel as well: "
+        "<b>says</b> is /sez/, not “sayz”, and <b>does</b> is /dʌz/, not “dooz”.</p>"
+        + "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+        + chip("says", "/sez/") + " " + chip("does", "/dʌz/") + "</div>"
+        "<p class='hint' style='margin-top:10px'>Irregular plurals — <b>children</b>, "
+        "<b>feet</b>, <b>men</b>, <b>people</b> — take no ‑s at all, so none of this applies "
+        "to them.</p></div>"
+
+        "<h2>One ending, four jobs</h2>"
+        "<div class='card'><p>The sound rule never changes, whichever of these you are "
+        "saying:</p>"
+        "<p>• <b>plural noun</b> — “three <b>books</b>” /s/<br>"
+        "• <b>third‑person verb</b> — “she <b>needs</b> it” /z/<br>"
+        "• <b>possessive</b> — “<b>Mike's</b> turn” /s/ &nbsp;·&nbsp; “<b>John's</b> turn” /z/<br>"
+        "• <b>contraction of is/has</b> — “<b>it's</b> late” /s/ &nbsp;·&nbsp; “<b>he's</b> "
+        "gone” /z/</p>"
+        + "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px'>"
+        + " ".join(chip(w, i) for w, i in
+                   (("three books", "/θriː bʊks/"), ("she needs it", "/ʃiː niːdz ɪt/"),
+                    ("Mike's turn", "/maɪks tɜːn/"), ("John's turn", "/dʒɒnz tɜːn/"),
+                    ("it's late", "/ɪts leɪt/"), ("he's gone", "/hiːz ɡɒn/")))
+        + "</div>"
+        "<p class='hint' style='margin-top:10px'>So there is nothing extra to learn for the "
+        "possessive or the contraction — you learned them when you learned the plural.</p>"
+        "</div>"
+        "</section>")
+
+
 _HOWTO_CARDS = [
     {"word": "bad", "say": "bad", "ipa": "/bæd/", "map": "a → /æ/  (open · wide · long)",
      "how": "Drop the jaw, spread the lips, tongue low and front. Flatter and a touch longer than bed.",
@@ -7327,7 +7663,8 @@ def _skill_panels(items):
             # these subtract against
             + _reading_vocab_panel()
             + _listening_panel() + _register_panel() + _mandarin_panel()
-            + _reading_panel(items) + _knowledge_panel() + _howto_panel()
+            + _reading_panel(items) + _knowledge_panel() + _ed_panel() + _s_panel()
+            + _howto_panel()
             + _pronscore_panel())
 
 
@@ -7661,6 +7998,12 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     nav += "<a data-panel='register'>🎭 Register</a>"
     nav += "<p class='navsec'>Reference — read &amp; understand</p>"
     nav += "<a data-panel='knowledge'>📕 Vowels &amp; consonants 101</a>"
+    nav += ("<a data-panel='edsound'>🔚 ‑ed endings"
+            "<small>past tense: /ɪd/, /t/ or /d/</small></a>")
+    # directly after ‑ed: it is the same voicing rule on a different ending, and
+    # the page is written to be read second
+    nav += ("<a data-panel='ssound'>🔚 ‑s endings"
+            "<small>plurals &amp; verbs: /ɪz/, /s/ or /z/</small></a>")
     nav += "<a data-panel='pronscore'>🧮 How scoring works</a>"
     nav += "<p class='navsec'>Recordings</p>"
     # map each recording (date, title) to its report panel id, so the Summary

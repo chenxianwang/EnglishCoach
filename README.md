@@ -28,7 +28,7 @@ vocabulary capture call an API.
 
 ## What's inside
 
-The app is a single dashboard with **17 training panels** organised around
+The app is a single dashboard with **21 training panels** organised around
 what you're working on, plus a **Setting Panel** for API keys, prompts and
 login (covered under [API keys](#api-keys) and [Login](#login) below, not in
 this table — it's configuration, not training):
@@ -59,6 +59,8 @@ this table — it's configuration, not training):
 | 🗣️ 中→EN Pronunciation | Mandarin-L1 specific: the interference patterns you'll keep hitting |
 | 🎭 Register | formal vs. informal, written vs. spoken — when to use which |
 | 📕 Vowels & consonants 101 | the basics of how English sounds are made |
+| 🔚 ‑ed endings | the three sounds of the past tense — /ɪd/, /t/, /d/ — and why the choice isn't a choice |
+| 🔚 ‑s endings | the same rule on the other ending: /ɪz/, /s/, /z/ across plurals, third-person verbs, possessives and *is*/*has* contractions |
 | 🧮 How scoring works | what each metric means and how the numbers are calculated |
 
 ### Vocabulary & surroundings
