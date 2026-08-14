@@ -1628,10 +1628,18 @@ def practice():
         score = scored(az)
         acc = az.get("accuracy")
         if score is None:
-            # Azure recognised nothing it could grade (silence, wrong word, a
-            # clipped recording). Say so — returning a null score let the client
-            # round it to 0 and log that as a real attempt, which quietly poisons
-            # the word's history and its average.
+            # Nothing to grade. Two very different causes look identical here,
+            # and telling them apart is the whole point: Azure refusing the
+            # request (expired key, exhausted free tier, a tier change still
+            # propagating) is not something the user can fix by re-recording,
+            # and sending them to check their microphone for it wastes their
+            # time. Only claim the recording is at fault when Azure said so.
+            fault = az.get("azure_fault")
+            if fault:
+                bits = [b for b in (fault.get("code"), fault.get("detail")) if b]
+                return jsonify(error="Azure refused the request — this is a service or "
+                                     "subscription problem, not your recording. %s"
+                                     % (" ".join(bits) or fault.get("reason", ""))[:180])
             return jsonify(error="Azure couldn't score that recording — it may be "
                                  "silent, cut off, or a different word. Try again.")
         return jsonify(score=score, accuracy=acc, pron=az.get("pron_score"),

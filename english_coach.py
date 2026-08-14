@@ -1343,13 +1343,14 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
     key = os.environ["AZURE_SPEECH_KEY"]
     region = os.environ["AZURE_SPEECH_REGION"]
     wav = _to_wav_16k_mono(audio_path)
-    # Metered here rather than at each call site: Azure bills the audio it is
-    # sent, and this is the one place every caller — analysis, single-word
-    # practice, reading, the phoneme backfill — passes through.
-    log_azure_usage(_wav_seconds(wav), kind=usage_kind)
+    # Measured here rather than at each call site — this is the one place every
+    # caller (analysis, single-word practice, reading, the phoneme backfill)
+    # passes through — but logged at the *end*, and only if Azure actually
+    # transcribed something. A refused request is never billed, so metering
+    # before the attempt overstated usage every time one failed.
+    audio_sec = _wav_seconds(wav)
 
     speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
-    audio_config = speechsdk.audio.AudioConfig(filename=wav)
 
     pa_config = speechsdk.PronunciationAssessmentConfig(
         reference_text=reference_text,
@@ -1363,12 +1364,8 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
         except Exception:
             pass  # older SDKs lack prosody
 
-    recognizer = speechsdk.SpeechRecognizer(
-        speech_config=speech_config, audio_config=audio_config, language=locale
-    )
-    pa_config.apply_to(recognizer)
-
     words, done = [], []
+    nomatch = []        # results Azure returned but could not align to the text
     timings = []        # (offset_ticks, duration_ticks) per word, for fluency
     prosody_errs = {}  # UnexpectedBreak / MissingBreak / Monotone, from the result JSON
     skipped = []       # segments whose scores couldn't be read, for reporting
@@ -1396,6 +1393,11 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
         try:
             res = evt.result
             if res.reason != speechsdk.ResultReason.RecognizedSpeech:
+                # Usually NoMatch: audio arrived, Azure just heard nothing it
+                # could align to the reference. Worth recording — it is the one
+                # outcome that really does mean "check your microphone", and
+                # without it that advice is given to everyone.
+                nomatch.append(str(res.reason))
                 return
             pr = speechsdk.PronunciationAssessmentResult(res)
             n = max(len(pr.words), 1)
@@ -1478,15 +1480,88 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
                         prosody_errs[et] = prosody_errs.get(et, 0) + 1
         progress("Scoring pronunciation (Azure)… %d words" % len(words))
 
-    recognizer.recognized.connect(on_recognized)
-    recognizer.session_stopped.connect(lambda e: done.append(True))
-    recognizer.canceled.connect(lambda e: done.append(True))
+    cancel = []          # why Azure gave up, when it did
+
+    def on_canceled(evt):
+        # The only place Azure ever explains itself when nothing gets scored.
+        # Throwing this away turned every server-side refusal — an expired key,
+        # a blocked or throttled resource, an unsupported locale — into "the
+        # recording may be silent, cut off, or a different word", which sends
+        # you to check your microphone for a problem that is in your
+        # subscription. Same swallow-nothing rule as `on_recognized`: this runs
+        # on an SDK thread, so an exception here would hang the wait loop.
+        try:
+            d = evt.cancellation_details
+            cancel.append({"reason": str(d.reason),
+                           "code": str(getattr(d, "error_code", "") or ""),
+                           "detail": (d.error_details or "").strip()})
+        except Exception as e:                         # noqa: BLE001
+            cancel.append({"reason": "Unknown", "code": "",
+                           "detail": str(e)[:160]})
+        done.append(True)
 
     import time
-    recognizer.start_continuous_recognition()
-    while not done:
-        time.sleep(0.3)
-    recognizer.stop_continuous_recognition()
+
+    def _fault_of(cancels):
+        """A cancellation that is a refusal, not the normal end of the file."""
+        return next((c for c in cancels
+                     if c["reason"] != "CancellationReason.EndOfStream"), None)
+
+    def _permanent(fault):
+        """Refusals no retry can fix, because the credentials are wrong.
+
+        Matched on the message text only, never on a bare "401"/"403": Azure
+        appends a hex SessionId to every detail string, and those digits turn
+        up in it by chance.
+        """
+        blob = (fault.get("detail") or "").lower()
+        return ("authentication error" in blob or "forbidden" in blob
+                or "invalid subscription" in blob)
+
+    # Retry a refusal, because a refusal is often not about this request.
+    # Changing a resource's pricing tier propagates across Azure's nodes over
+    # minutes to hours, and while it does, the same key alternates between
+    # nodes that know the new tier and nodes still enforcing the old one —
+    # measured here on 2026-08-10 as an exact 50/50 alternation, "Quota
+    # exceeded" and a clean 100 back to back. One retry turns that into a
+    # working app; without it half of every session fails for no reason the
+    # user can act on.
+    #
+    # Retrying a genuine quota exhaustion is harmless: Azure refuses without
+    # transcribing, so nothing is billed and nothing is logged, and the user
+    # still gets the real reason after the last attempt.
+    for attempt in range(3):
+        words.clear(); nomatch.clear(); timings.clear()
+        skipped.clear(); done.clear(); cancel.clear()
+        prosody_errs.clear()
+        for v in acc.values():
+            v[0] = v[1] = 0.0
+
+        # Both are rebuilt per attempt: an AudioConfig is consumed by the
+        # recognition it feeds and does not rewind for a second one.
+        recognizer = speechsdk.SpeechRecognizer(
+            speech_config=speech_config,
+            audio_config=speechsdk.audio.AudioConfig(filename=wav),
+            language=locale,
+        )
+        pa_config.apply_to(recognizer)
+        recognizer.recognized.connect(on_recognized)
+        recognizer.session_stopped.connect(lambda e: done.append(True))
+        recognizer.canceled.connect(on_canceled)
+
+        recognizer.start_continuous_recognition()
+        while not done:
+            time.sleep(0.3)
+        recognizer.stop_continuous_recognition()
+
+        _f = _fault_of(cancel)
+        if words or not _f or _permanent(_f) or attempt == 2:
+            break
+        progress("Azure refused that attempt — retrying…")
+        time.sleep(1.0 + attempt)
+
+    if words:
+        log_azure_usage(audio_sec, kind=usage_kind)
 
     # always report the full six Azure categories (0 when none)
     error_counts = {k: 0 for k in AZURE_ERROR_KEYS}
@@ -1518,7 +1593,20 @@ def azure_pronunciation(audio_path, reference_text, progress=lambda m: None,
                         % (len(skipped), "; ".join(skipped[:3])))
         progress("⚠️ %d segment(s) skipped during scoring" % len(skipped))
 
+    # A cancellation with EndOfStream is the normal end of a file, not a fault.
+    # Anything else is Azure declining, and the caller has to be able to tell
+    # that apart from "you said nothing" — the two look identical from here
+    # (no words, every metric None) and have completely different fixes.
+    fault = _fault_of(cancel)
+    if fault and not words:
+        bits = [b for b in (fault["code"], fault["detail"]) if b]
+        warnings.append("Azure cancelled the request: %s"
+                        % (" — ".join(bits) or fault["reason"]))
+        progress("⚠️ Azure cancelled: %s" % (fault["code"] or fault["reason"]))
+
     out = {
+        "azure_fault": fault if not words else None,
+        "no_speech": bool(nomatch) and not words and not fault,
         "pron_score": mean("pron"),
         "accuracy": mean("accuracy"),
         "fluency": mean("fluency"),
