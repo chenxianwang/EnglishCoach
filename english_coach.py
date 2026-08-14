@@ -2054,8 +2054,19 @@ _DASHBOARD_CSS = """
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
   :root{--bg:#0d1620;--panel:#0a1119;--card:#172530;--ink:#eaf3f2;--mut:#8fa6ad;
         --accent:#46b3c9;--accent-ink:#08222b;--seafoam:#a8dadc;
-        --good:#43c59e;--warn:#ffb454;--bad:#ff6b6b;--line:#22343f;--surface2:#1f3542;}
-  *{box-sizing:border-box}
+        --good:#43c59e;--warn:#ffb454;--bad:#ff6b6b;--line:#22343f;--surface2:#1f3542;
+        /* The page never declared itself dark, so the browser drew its own
+           widgets -- scrollbars above all -- in their light form: a bright
+           white bar down the sidebar's edge, the highest-contrast thing on a
+           dark screen and the first place the eye lands. This one property
+           flips every native widget to its dark form. */
+        color-scheme:dark;
+        /* Inherited, so it reaches every scroller on the page. Track stays
+           transparent and the thumb sits at surface level, which makes the
+           scrollbar read as an edge rather than as a second divider competing
+           with the sidebar's actual border. */
+        scrollbar-color:var(--surface2) transparent;}
+  *{box-sizing:border-box;scrollbar-width:thin}
   body{margin:0;background:var(--bg);color:var(--ink);display:flex;
        font:16px/1.62 'IBM Plex Sans',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   h1,h2,h3,h4,.brand,.level{font-family:'Space Grotesk','IBM Plex Sans',sans-serif;letter-spacing:-.01em}
@@ -2063,6 +2074,8 @@ _DASHBOARD_CSS = """
   .sidenav{width:240px;flex-shrink:0;position:sticky;top:0;align-self:flex-start;
            height:100vh;overflow:auto;padding:24px 14px;border-right:1px solid var(--line);
            background:var(--panel)}
+  /* quiet by default, findable when you reach for it */
+  .sidenav:hover{scrollbar-color:#33505f transparent}
   .brand{font-weight:800;font-size:16px;margin:0 10px 16px}
   .navsec{font-size:12px;text-transform:uppercase;letter-spacing:.08em;
           color:var(--mut);margin:18px 10px 6px;cursor:pointer;user-select:none;
