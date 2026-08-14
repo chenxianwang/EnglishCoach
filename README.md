@@ -742,6 +742,37 @@ handler picks up — click the right-hand column of any correction table to hear
 the fixed version. The spoken text is not the cell's markup: the editorial
 note in a trailing `<span>` is dropped, `<b>` emphasis is unwrapped, and a
 leading ellipsis is trimmed, because all three are for the eye.
+
+**Exporting the slides as images.** `retro_slides.py` renders a retrospective
+to one PNG per slide, for posting or narrating outside the app:
+
+```
+python3 retro_slides.py                 # the newest retrospective
+python3 retro_slides.py 2026-08-13      # a particular one, by filename stem
+python3 retro_slides.py 2026-08-13 16   # re-render just slide 16
+```
+
+Images land in `retrospectives/<stem>-slides/`, named with the deck's own slide
+numbers so the folder reads in presentation order. A retrospective is one
+continuous page, so *where a slide ends* is a decision the script makes: each
+`<article class="slide">` is a slide, the masthead splits into the cover and
+the contents page it carries, and a section divider gets no image of its own —
+it's a thin band, worthless alone, so it rides on top of the slide that opens
+its section, and every image then says which section it belongs to.
+
+The export stylesheet is **`retrospectives/_slides.css`**, not `_RETRO_CSS`:
+the images keep the document's original paper-white design, because they leave
+the app and get read on their own, where the dashboard's dark palette has
+nothing around it to belong to. The two files style the same class vocabulary,
+so a block added to a retrospective needs a rule in both or it renders unstyled
+in one of them.
+
+Rendering shells out to headless Chrome, which screenshots the *viewport* and
+not the page — so each slide is rendered into an over-tall window and trimmed
+back to its content afterwards. The trim keeps the full 1200px width on
+purpose: cropping to the ink would re-centre every slide on its own widest
+element and the column would jitter from image to image.
+
 ## Design notes
 
 A few decisions that are less obvious than they look:
