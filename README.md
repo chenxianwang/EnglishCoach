@@ -41,6 +41,7 @@ this table — it's configuration, not training):
 | 📖 Reading | reread the polished version of one of your own past recordings, scored against it |
 | 📋 Speaking error log | three tabs — the grammar log itself, **Grammar error by type stats**, and **Pronunciation error stats**; the two stats tabs show how often each sound and each type of mistake goes wrong, as a rate, and how that rate is moving week by week ([details](#error-rates-not-error-lists)) |
 | 🗣️ Speaking vocabulary | how much distinct vocabulary you actually produce, growth over time, and the words you're recycling |
+| 📖 Reading vocabulary | only the words your *polished rewrites* use and you don't — each with the sentence it came from — see [Reading vocabulary](#reading-vocabulary) |
 | 📣 How-to: tricky words | step-by-step articulation guides for problem sounds |
 
 ### Listening
@@ -567,6 +568,70 @@ by ear, as opposed to how much you can produce.
 Both panels include a toggle that overlays the two vocabularies — words you can
 say but not reliably hear, words you can recognise but don't produce yourself,
 and the overlap where both match.
+
+### Reading vocabulary
+
+The reading library is not outside material. Every passage in it is the
+**polished rewrite of one of your own recordings** — so every word in it is one
+the analyser reached for to express an idea that was already yours. That
+provenance is the whole point of tracking it separately: the difference between
+this vocabulary and your speaking vocabulary is not "words that exist in
+English", it is *the word you needed on a specific day and didn't have*.
+
+So the panel shows **only** the gap. It takes the content words in the polished
+passages and subtracts two things: everything you have produced in a recording
+(known server-side, from the transcripts) and everything you have recognised in
+dictation (known only in the browser, from the listening module's own store — so
+that half of the subtraction finishes client-side, the same way the speaking
+panel's overlap card works). What survives both is ranked by **how many separate
+passages it appeared in**, not by raw frequency: a word used nine times inside
+one passage is one topic you happened to talk about, and a word that turns up in
+four separate passages is part of how you actually speak.
+
+Everything else is deliberately absent. There is no total, no growth curve and
+no full frequency table, because all three describe a word list you already
+mostly own, and on the same screen they bury the two hundred words that are the
+point. Speaking vocabulary already reports size and growth; this panel reports
+only what is missing, against a single number.
+
+**Each word carries the sentence it came from.** A bare list is a vocabulary
+quiz; the sentence shows the word doing the job it was brought in to do, inside
+a rewrite of something you said yourself. `_gap_examples` prefers a sentence
+between 40 and 240 characters — long enough to carry meaning, short enough not
+to bury the target — then makes a second pass with the length preference dropped,
+since roughly one gap word in twenty only ever occurs in a very long or very
+terse sentence and an awkward example beats none.
+
+One filter splits the list, because the two halves are different lessons:
+
+| Filter | What it means |
+|---|---|
+| **Genuinely new** | no form of it appears anywhere in what you say or understand |
+| **Endings on words you know** | the root is familiar; the plural, past tense, `-ing` or possessive on the end of it is not |
+
+The second exists because it is the same weakness the ‑ed report and the
+listening error log keep finding, arriving from a third direction. A speaker who
+drops `-ed` in production and misses `'ve` in perception will also, predictably,
+have `allowed` and `settling` show up as "words I have never used" while `allow`
+and `settle` sit comfortably in the speaking vocabulary. Listing those without
+the annotation would bury the pattern among genuinely unknown words like
+*joseki*.
+
+**Studied** marks a word as worked through: it fades, sinks to the bottom of the
+list, and comes off the count, stored in `rv_done`. The list only shrinks on its
+own when you actually use the word in a recording, which may be weeks away, and
+a study list you cannot cross items off stops being one by about the third
+visit.
+
+Base forms are matched with a deliberately crude rule (`_base_forms`) that
+covers **inflection only** — `-s/-es/-ies`, `-ed/-ied`, `-ing`, possessive `'s`,
+and `n't`, with the doubled-consonant and `-y` cases handled explicitly.
+Derivational endings (`-er`, `-est`, `-ly`) are excluded on purpose: they
+manufacture roots that happen to be real words and are not the root at all —
+*number* is not a form of *numb*, *only* is not a form of *on*. A false link is
+worse than a missed one here, because it silently files a word you have never
+met under "you already know this". When a word generates several candidate
+roots, the longest match wins, so *ones* resolves to *one* rather than *on*.
 
 ### Surrounding vocabulary
 

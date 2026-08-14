@@ -6978,6 +6978,341 @@ def _listening_vocab_panel(hidden=True):
             % (cls, body, texts, spoken, function_words, _LISTEN_VOCAB_JS))
 
 
+def load_polished(library=None, min_words=5):
+    """Every polished rewrite — the reading library, as text.
+
+    Mirrors `load_transcripts`, and deliberately reads the same `<stem>` layout
+    rather than taking the parsed `items`: this report is about the whole
+    library on disk, and a recording whose result.json failed to parse should
+    still contribute its vocabulary. `<stem>.polished.txt` is the source of
+    truth; result.json's `polished` field is the fallback for anything analyzed
+    before the sidecar was written.
+    """
+    lib = library or library_dir()
+    out = []
+    if not os.path.isdir(lib):
+        return out
+    dirs = [d for d, _s, _f in os.walk(lib) if d != lib]
+    for d in sorted(dirs):
+        name = os.path.basename(d)
+        text = ""
+        pol = os.path.join(d, name + ".polished.txt")
+        if os.path.exists(pol):
+            try:
+                with open(pol, encoding="utf-8") as f:
+                    text = f.read().strip()
+            except Exception:
+                text = ""
+        date, title = None, name
+        res = os.path.join(d, name + ".result.json")
+        if os.path.exists(res):
+            try:
+                with open(res, encoding="utf-8") as f:
+                    r = json.load(f)
+                date = r.get("date")
+                title = r.get("title") or name
+                if not text:
+                    text = (r.get("polished") or "").strip()
+            except Exception:
+                pass
+        words = _tokenize(text)
+        if len(words) < min_words:
+            continue
+        if not date:
+            at = _timestamp_from_name(name)
+            if at:
+                date = at.date().isoformat()
+            else:
+                try:
+                    import datetime
+                    date = datetime.date.fromtimestamp(
+                        os.path.getmtime(pol if os.path.exists(pol) else d)
+                    ).isoformat()
+                except OSError:
+                    date = ""
+        out.append({"stem": name, "title": title, "date": date or "",
+                    "text": text, "words": words})
+    out.sort(key=lambda r: (r["date"], r["stem"]))
+    return out
+
+
+def reading_vocabulary(passages=None):
+    """Vocabulary statistics across the polished rewrites of your recordings.
+
+    Same shape as `speaking_vocabulary` so both can drive the growth chart and
+    the frequency table, plus `passage_count` — how many separate passages a
+    word turned up in. For a gap report that is the more honest ranking than
+    raw frequency: a word used nine times inside one passage is one topic, a
+    word that appears in four separate passages is genuinely part of how you
+    talk and worth learning first.
+    """
+    from collections import Counter
+    rows = passages if passages is not None else load_polished()
+    counts, passage_count, first_seen = Counter(), Counter(), {}
+    sessions, seen = [], set()
+    for r in rows:
+        before = len(seen)
+        counts.update(r["words"])
+        for w in set(r["words"]):
+            passage_count[w] += 1
+        for w in r["words"]:
+            first_seen.setdefault(w, r["date"] or r["title"])
+        seen.update(r["words"])
+        sessions.append({
+            "date": r["date"], "title": r["title"],
+            "tokens": len(r["words"]), "types": len(set(r["words"])),
+            "new": len(seen) - before, "cumulative": len(seen),
+        })
+    tokens = sum(counts.values())
+    return {
+        "counts": counts, "passage_count": passage_count,
+        "first_seen": first_seen, "sessions": sessions,
+        "tokens": tokens, "types": len(counts),
+        "passages": len(rows),
+        "ttr": round(len(counts) / tokens, 3) if tokens else 0.0,
+    }
+
+
+def _base_forms(w):
+    """Plausible base forms of an *inflected* word.
+
+    Deliberately crude — no lemmatizer, no dependency — and deliberately limited
+    to inflection: plural/3rd-person -s, past -ed, -ing, possessive 's, and the
+    n't contraction. Derivational endings (-er, -est, -ly) are excluded on
+    purpose. They look like they belong, but they manufacture roots that happen
+    to be real words and are not the root at all — "number" is not a form of
+    "numb", "only" is not a form of "on". A false link here is worse than a
+    missed one, because it silently files a word the speaker has never met under
+    "you already know this".
+
+    The restriction also sharpens what the bucket means: these are grammatical
+    endings, which is precisely the thing this speaker's own data says gets
+    dropped in production and missed in perception.
+    """
+    out = set()
+    if w.endswith("'s") or w.endswith("s'"):
+        out.add(w[:-2])
+    if w.endswith("n't"):
+        out.add(w[:-3])
+    for suf, adds in (("ies", ("y",)), ("ied", ("y",)),
+                      ("es", ("", "e")), ("ed", ("", "e")), ("ing", ("", "e")),
+                      ("s", ("",))):
+        if w.endswith(suf) and len(w) > len(suf) + 1:
+            stem = w[:-len(suf)]
+            for a in adds:
+                out.add(stem + a)
+            # stopped -> stop, running -> run, bigger -> big
+            if len(stem) > 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+                out.add(stem[:-1])
+    out.discard(w)
+    # Longest first: "ones" generates both "on" and "one", and only the longer
+    # one is the word it is actually a form of. Consumers take the first match.
+    return sorted((b for b in out if len(b) > 1), key=lambda b: (-len(b), b))
+
+
+_READ_VOCAB_JS = r"""
+(function(){
+ // The gap list. Reading and speaking vocabulary are both known server-side, but
+ // what you have HEARD lives in the listening module's own store, so the last
+ // subtraction finishes in the browser. Same source the speaking panel reads.
+ var S=window.SkillStore; if(!S) return;
+ var MODE='all', DONEKEY='rv_done';
+ function heardWords(){
+   var srs=S.get('dict_srs',{}), sc=S.get('ec_scores',{}), ids={}, heard={};
+   Object.keys(srs).forEach(function(k){ ids[k]=1; });
+   Object.keys(sc).forEach(function(k){ if(k.indexOf('dict:')===0) ids[k.slice(5)]=1; });
+   var clips=window.LISTEN_TEXTS||{};
+   Object.keys(ids).forEach(function(id){
+     (clips[id]||'').toLowerCase().replace(/[^a-z' ]+/g,' ').split(/\s+/).forEach(function(w){
+       w=w.replace(/^'+|'+$/g,''); if(w.length>1||w==='a'||w==='i') heard[w]=1; });
+   });
+   return heard;
+ }
+ // Words you have worked through. A study list you cannot cross items off stops
+ // being a study list on about the third visit — and this one only shrinks by
+ // you actually using the word in a recording, which could be weeks away.
+ function done(){ var d=S.get(DONEKEY,{}); return (d&&typeof d==='object')?d:{}; }
+ function isDone(w){ return !!done()[w]; }
+ function setDone(w,on){ var d=done(); if(on) d[w]=1; else delete d[w]; S.set(DONEKEY,d); }
+
+ function mark(sentence, word){
+   // Bold the target inside its own sentence, matching the word only on
+   // boundaries so "reach" doesn't light up inside "reached".
+   if(!sentence) return '';
+   var safe=word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+   var re=new RegExp("(^|[^A-Za-z'])("+safe+")([^A-Za-z']|$)","i");
+   var out=S.esc(sentence);
+   var m=out.match(re);
+   if(!m) return out;
+   return out.replace(re, function(_a,pre,hit,post){ return pre+"<b style='color:var(--accent)'>"+hit+"</b>"+post; });
+ }
+ function card(x){
+   var badge=x.p>1 ? "<span class='hint'> · in "+x.p+" passages</span>" : "";
+   var root=x.root ? " <span class='hint'>· ending on <b>"+S.esc(x.root)+"</b>, which you do say</span>" : "";
+   var d=isDone(x.w);
+   return "<div class='gapw' style='padding:12px 2px;border-bottom:1px solid var(--line)"+(d?";opacity:.45":"")+"'>"+
+     "<div style='display:flex;gap:10px;align-items:baseline;flex-wrap:wrap'>"+
+       "<span data-say=\""+S.esc(x.w)+"\" style='font-weight:700;font-size:17px;color:var(--accent);cursor:pointer' "+
+         "title='Click to hear it'>"+S.esc(x.w)+"</span>"+
+       badge+root+
+       "<button class='btn small rvdone' data-w=\""+S.esc(x.w)+"\" style='margin-left:auto;padding:2px 9px'>"+
+         (d?"↩ Put back":"✓ Studied")+"</button>"+
+     "</div>"+
+     (x.ex ? "<p class='hint' style='margin:6px 0 0;font-style:italic'>“"+mark(x.ex,x.w)+"”</p>" +
+             (x.src?"<p class='hint' style='margin:2px 0 0;font-size:12px'>— "+S.esc(x.src)+"</p>":"")
+           : "")+
+   "</div>";
+ }
+ function render(){
+   var el=document.getElementById('rv-gap'); if(!el) return;
+   var rows=window.VOCAB_GAP||[];
+   if(!rows.length){
+     el.innerHTML="<div class='card'><b>Nothing to study here.</b><p class='hint'>Every content "+
+       "word in your polished passages is already one you say or recognise.</p></div>"; return; }
+   var heard=heardWords(), anyHeard=Object.keys(heard).length>0;
+   var live=rows.filter(function(x){ return !heard[x.w]; });
+   // Split only to label each entry — one list, not two sections.
+   live.forEach(function(x){
+     x.root=(x.bases||[]).filter(function(v){ return window.READ_KNOWN_BASE[v] || heard[v]; })[0] || '';
+   });
+   var novel=live.filter(function(x){ return !x.root; });
+   var forms=live.filter(function(x){ return x.root; });
+   var show = MODE==='new' ? novel : (MODE==='forms' ? forms : live);
+   show=show.slice().sort(function(a,b){
+     var ad=isDone(a.w)?1:0, bd=isDone(b.w)?1:0;   // studied ones sink
+     return ad-bd || b.p-a.p || b.n-a.n || (a.w<b.w?-1:1); });
+   var left=live.filter(function(x){ return !isDone(x.w); }).length;
+   function tab(m,label,n){
+     return "<button class='btn small rvmode' data-m='"+m+"' aria-pressed='"+(MODE===m?'true':'false')+"'"+
+       (MODE===m?" style='background:var(--accent);color:#08222b'":"")+">"+label+
+       " <span class='hint'>"+n+"</span></button>";
+   }
+   // One number, not three. Two cards that read the same until you have marked
+   // something studied are exactly the noise this panel was stripped down to
+   // avoid; the totals belong in a sentence.
+   var doneN=live.length-left;
+   el.innerHTML=
+     "<div class='metrics'>"+
+       "<div class='m'><span style='color:var(--warn)'>"+left+"</span>words to study</div>"+
+     "</div>"+
+     "<p class='hint' style='margin:8px 2px 0'>Out of "+live.length+" content words across "+
+       window.RV_TOTALS.passages+" passages of your own polished speech that you have never said"+
+       (anyHeard?" or recognised in dictation":"")+
+       (doneN?" — <b>"+doneN+"</b> marked studied":"")+".</p>"+
+     "<div style='display:flex;gap:8px;flex-wrap:wrap;margin:14px 2px'>"+
+       tab('all','Everything',live.length)+tab('new','Genuinely new',novel.length)+
+       tab('forms','Endings on words you know',forms.length)+
+     "</div>"+
+     "<div>"+show.map(card).join('')+"</div>";
+ }
+ function wire(){
+   var el=document.getElementById('rv-gap'); if(!el || el.__wired) return; el.__wired=true;
+   el.addEventListener('click',function(e){
+     var m=e.target.closest&&e.target.closest('.rvmode');
+     if(m){ MODE=m.getAttribute('data-m'); render(); return; }
+     var d=e.target.closest&&e.target.closest('.rvdone');
+     if(d){ var w=d.getAttribute('data-w'); setDone(w,!isDone(w)); render(); return; }
+   });
+ }
+ window.addEventListener('load',function(){ wire(); render(); });
+})();
+"""
+
+
+def _gap_examples(passages, words):
+    """One real sentence per gap word, taken from the passage it appeared in.
+
+    A bare word list is a vocabulary quiz. The sentence is what makes it
+    studiable: it shows the word doing the job it was brought in to do, in a
+    rewrite of something the speaker themselves said. Sentences that are too
+    short to carry meaning or long enough to bury the word are passed over in
+    favour of a later one, and only the first passage that offers a usable
+    sentence is consulted, so a word appearing ten times still costs one lookup.
+
+    A second pass then drops the length preference for whatever the first pass
+    could not place. Roughly one gap word in twenty only ever occurs in a very
+    long or very terse sentence, and an awkward example is worth far more than a
+    bare word with no context at all.
+    """
+    want = set(words)
+    out = {}
+    for lo, hi in ((40, 240), (0, 10 ** 6)):
+        for p in passages:
+            if not want:
+                return out
+            for raw in re.split(r"(?<=[.!?])\s+", p.get("text") or ""):
+                s = " ".join(raw.split())
+                if not (lo <= len(s) <= hi):
+                    continue
+                hits = want.intersection(_tokenize(s))
+                for w in hits:
+                    out[w] = {"ex": s, "src": p.get("title") or p.get("stem") or ""}
+                want -= hits
+    return out
+
+
+def _reading_vocab_panel(hidden=True):
+    """The third vocabulary — and deliberately only its gap.
+
+    Every passage in the reading library is the polished rewrite of one of the
+    speaker's own recordings, so a word here is one the analyser chose to
+    express an idea that was already theirs. That provenance is the entire
+    reason the panel exists, and it is also the reason the panel shows nothing
+    else: totals, growth curves and a full frequency table all belong to a word
+    list this speaker mostly already owns, and putting them on the same screen
+    buries the two hundred words that are the actual point. Speaking vocabulary
+    already reports size and growth; this one reports only what is missing.
+    """
+    cls = "tabpanel hidden" if hidden else "tabpanel"
+    v = reading_vocabulary()
+    if not v["tokens"]:
+        return ("<section id='vocabread' class='%s'>"
+                "<h1>Reading vocabulary</h1><div class='card'><b>No polished "
+                "passages yet.</b><p class='hint'>Analyze a recording with "
+                "grammar and word-choice feedback enabled. Its polished rewrite "
+                "becomes a reading passage, and its vocabulary lands here.</p>"
+                "</div></section>" % cls)
+
+    counts, pcount = v["counts"], v["passage_count"]
+    spoken = set(speaking_vocabulary()["counts"].keys())
+    known_base = {w: 1 for w in spoken}
+    gap = [w for w in counts
+           if w not in spoken and w not in _FUNCTION_WORDS]
+    examples = _gap_examples(load_polished(), gap)
+    rows = []
+    for w in gap:
+        e = examples.get(w, {})
+        rows.append({"w": w, "n": counts[w], "p": pcount[w],
+                     "bases": _base_forms(w),
+                     "ex": e.get("ex", ""), "src": e.get("src", "")})
+    rows.sort(key=lambda r: (-r["p"], -r["n"], r["w"]))
+    payload = json.dumps(rows, ensure_ascii=False).replace("</", "<\\/")
+    base_idx = json.dumps(known_base, ensure_ascii=False).replace("</", "<\\/")
+    totals = json.dumps({
+        "passages": v["passages"],
+        "content": sum(1 for w in counts if w not in _FUNCTION_WORDS),
+    })
+
+    body = (
+        "<h1>Reading vocabulary</h1>"
+        "<p class='sub'>The words your own rewrites use and you don't. Every "
+        "passage in your reading library is the polished version of one of your "
+        "recordings, so each word below was chosen to say something <em>you were "
+        "already trying to say</em> — you just reached for something else on the "
+        "day. That is what makes these worth studying deeply rather than a "
+        "wordlist: the context is already yours.</p>"
+        "<div id='rv-gap'></div>")
+
+    # LISTEN_TEXTS is embedded once by the listening-vocabulary panel and shared;
+    # this panel is emitted after it for that reason.
+    return ("<section id='vocabread' class='%s'>%s</section>"
+            "<script>window.VOCAB_GAP=%s;window.READ_KNOWN_BASE=%s;"
+            "window.RV_TOTALS=%s;\n%s</script>"
+            % (cls, body, payload, base_idx, totals, _READ_VOCAB_JS))
+
+
+RETRO_DIR = "retrospectives"
+
 def _skill_panels(items):
     return (_SKILLS_UTIL_JS + _vocab_panel()
             + _photo_desc_panel()
@@ -6988,6 +7323,9 @@ def _skill_panels(items):
             # be the thing that provides it
             + ("<script>%s</script>" % _VOCAB_BARS_JS)
             + _listening_vocab_panel() + _speaking_vocab_panel()
+            # after the listening panel, which embeds the clip texts both of
+            # these subtract against
+            + _reading_vocab_panel()
             + _listening_panel() + _register_panel() + _mandarin_panel()
             + _reading_panel(items) + _knowledge_panel() + _howto_panel()
             + _pronscore_panel())
@@ -7308,6 +7646,8 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     nav += ("<a data-panel='vocablisten'>🎧 Listening vocabulary"
             "<small>what you take in</small></a>")
     nav += "<a data-panel='stories'>📖 Reading</a>"
+    nav += ("<a data-panel='vocabread'>📖 Reading vocabulary"
+            "<small>words your rewrites use</small></a>")
     nav += ("<a data-panel='vocab'>🧭 Surrounding vocabulary"
             "<small>photos and captures</small></a>")
     nav += ("<a data-panel='photodesc'>🖼 Describe a photo"
