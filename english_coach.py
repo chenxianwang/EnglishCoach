@@ -692,6 +692,7 @@ def _anthropic_analyze(transcript, model=None):
 
 def _deepseek_chat(messages, model, max_tokens=8000):
     """One call to DeepSeek's OpenAI-compatible chat endpoint (stdlib urllib)."""
+    import time
     import urllib.request
     import urllib.error
 
@@ -713,18 +714,33 @@ def _deepseek_chat(messages, model, max_tokens=8000):
         base + "/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer " + key})
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "ignore")[:220]
-        raise RuntimeError(
-            "DeepSeek API call failed (HTTP %s): %s — check your key/credits, or "
-            "override the model with the DEEPSEEK_MODEL env var (current: '%s')."
-            % (e.code, detail, model))
-    except Exception as e:
-        raise RuntimeError("DeepSeek API call failed (%s: %s)."
-                           % (type(e).__name__, str(e)[:180]))
+    # A single TLS reset — one call in 47 over August — used to cost a whole
+    # analysis its grammar section, because there was no retry behind it at
+    # all. Retry only the shapes that can succeed on a second try: a connection
+    # that never completed, a truncated body, and the server-side codes that
+    # mean "come back" (429, 5xx). A 4xx is a bad key, a bad model name or a
+    # malformed request; retrying it burns two more round trips and then
+    # reports the identical error, later.
+    RETRY_CODES = (429, 500, 502, 503, 504)
+    attempts = 3
+    for i in range(attempts):
+        last = i == attempts - 1
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "ignore")[:220]
+            if last or e.code not in RETRY_CODES:
+                raise RuntimeError(
+                    "DeepSeek API call failed (HTTP %s): %s — check your key/credits, or "
+                    "override the model with the DEEPSEEK_MODEL env var (current: '%s')."
+                    % (e.code, detail, model))
+        except Exception as e:
+            if last:
+                raise RuntimeError("DeepSeek API call failed (%s: %s)."
+                                   % (type(e).__name__, str(e)[:180]))
+        time.sleep(1.5 * (i + 1))                      # 1.5s, then 3s
     try:
         choice = payload["choices"][0]
         message = choice["message"]
