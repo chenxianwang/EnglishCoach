@@ -1173,6 +1173,26 @@ _PRACTICE_JS = r"""
  function st(){ return window.SkillStore; }
  function custom(){ return st().get('pw_custom',[]); }
  function hidden(){ return st().get('pw_hidden',[]); }
+ // "Mastered" = the last N attempts all scored X or better. Both halves are
+ // yours to set: N is how much consistency you want to prove (1 is a lucky
+ // take, 5 is a habit) and X is the bar. They live in SkillStore, so the
+ // definition follows you between devices instead of being a constant only the
+ // source knows about.
+ //
+ // Clamp on read, never only on write: these values are server-backed and can
+ // arrive from an older build, a half-finished edit, or a hand-edited store.
+ // N below 1 is the dangerous one -- a.slice(-0) returns the WHOLE array in
+ // JavaScript, so N=0 would silently test every attempt you have ever made and
+ // un-master almost everything.
+ var MASTER_N_MAX=10;
+ function _int(v,d){ v=parseInt(v,10); return isNaN(v)?d:v; }
+ function mN(){ return Math.max(1, Math.min(MASTER_N_MAX, _int(st().get('pw_master_n',3),3))); }
+ function mX(){ return Math.max(1, Math.min(100, _int(st().get('pw_master_min',85),85))); }
+ function isMastered(m){
+   var a=m.arr||[], n=mN(), x=mX();
+   if(a.length<n) return false;
+   return a.slice(-n).every(function(o){ return o.s>=x; });
+ }
  // Any word you have ever recorded an attempt for. base() is the CURRENT top-20
  // mispronunciations, so it churns as you add recordings — without this, a word
  // you had drilled for weeks silently vanished from the table (with its whole
@@ -1190,14 +1210,18 @@ _PRACTICE_JS = r"""
    function xs(i){return n===1?W/2:p+(W-2*p)*i/(n-1);}
    function ys(s){return H-p-(H-2*p)*(s/100);}
    var d=pts.map(function(o,i){return (i?'L':'M')+xs(i).toFixed(1)+' '+ys(o.s).toFixed(1);}).join(' ');
-   function pc(s){ return s>=85?'#43c59e':s>=75?'#ffb454':'#ff6b6b'; }
+   // Green is "at your bar", so it tracks X rather than a fixed 85; the amber
+   // band keeps its 10-point width below it.
+   var goal=mX();
+   function pc(s){ return s>=goal?'#43c59e':s>=goal-10?'#ffb454':'#ff6b6b'; }
    var last=pts[n-1].s,col=pc(last);
    var dots=pts.map(function(o,i){return "<circle cx='"+xs(i).toFixed(1)+"' cy='"+ys(o.s).toFixed(1)+"' r='2.1' fill='"+pc(o.s)+"'/>";}).join('');
    return "<svg width='"+W+"' height='"+H+"' style='vertical-align:middle'>"+
-     "<line x1='0' y1='"+ys(85).toFixed(1)+"' x2='"+W+"' y2='"+ys(85).toFixed(1)+"' stroke='#43c59e' stroke-opacity='.35' stroke-dasharray='3 3'/>"+
+     "<line x1='0' y1='"+ys(goal).toFixed(1)+"' x2='"+W+"' y2='"+ys(goal).toFixed(1)+"' stroke='#43c59e' stroke-opacity='.35' stroke-dasharray='3 3'/>"+
      "<path d='"+d+"' fill='none' stroke='"+col+"' stroke-width='1.7'/>"+dots+"</svg>";
  }
- function num(v){ if(v==null)return "<span class='hint'>—</span>"; var col=v>=85?'#43c59e':v>=70?'#ffb454':'#ff6b6b'; return "<b style='color:"+col+"'>"+v+"</b>"; }
+ function num(v){ if(v==null)return "<span class='hint'>—</span>";
+   var g=mX(), col=v>=g?'#43c59e':v>=g-15?'#ffb454':'#ff6b6b'; return "<b style='color:"+col+"'>"+v+"</b>"; }
  function metrics(word){ var a=(st().get('ec_scores',{}))['word:'+word.toLowerCase()]||[];
    var last=a.length?a[a.length-1].s:null;
    var best=a.length?Math.max.apply(null,a.map(function(x){return x.s;})):null;
@@ -1213,7 +1237,6 @@ _PRACTICE_JS = r"""
      var va=sortVal(a),vb=sortVal(b);
      if(SORT.key==='word'){ return SORT.dir==='asc'?(va<vb?-1:va>vb?1:0):(va<vb?1:va>vb?-1:0); }
      return SORT.dir==='asc'? va-vb : vb-va; });
-   function isMastered(m){ var a=m.arr||[]; if(a.length<3) return false; return a.slice(-3).every(function(x){return x.s>=85;}); }
    var mastered=ms.filter(isMastered).length;
    var left=ms.length-mastered;
    var pct=ms.length?Math.round(mastered/ms.length*100):0;
@@ -1231,15 +1254,25 @@ _PRACTICE_JS = r"""
    var status="<div id='pw-status' class='hint' style='margin:8px 2px;min-height:18px'></div>";
    var mask=st().get('pw_hidemastered',false);
    var shown=mask?ms.filter(function(m){return !isMastered(m);}):ms;
-   var fbtn="<button class='btn small' onclick='PW.toggleMask()' style='"+(mask?'background:var(--accent);color:#08222b;border-color:var(--accent)':'')+"'>"+(mask?'☑':'☐')+" Hide mastered (last 3 ≥ 85)</button>";
-   var fbar="<div style='display:flex;gap:12px;align-items:center;margin:10px 2px 4px;flex-wrap:wrap'>"+fbtn+
+   var fbtn="<button class='btn small' onclick='PW.toggleMask()' style='"+(mask?'background:var(--accent);color:#08222b;border-color:var(--accent)':'')+"'>"+(mask?'☑':'☐')+" Hide mastered</button>";
+   // The rule sits outside the button and stays visible whether the filter is
+   // on or off, because it defines the "mastered" count in the summary above
+   // too -- hiding it inside the toggle made the headline number unexplained.
+   var nsty="width:52px;padding:3px 6px;font-size:13px;text-align:center";
+   var frule="<span class='hint' style='display:inline-flex;align-items:center;gap:5px'>mastered = last "+
+     "<input id='pw-mn' type='number' min='1' max='"+MASTER_N_MAX+"' step='1' value='"+mN()+
+     "' style='"+nsty+"' onchange='PW.setMaster()' onkeydown='if(event.key===\"Enter\")PW.setMaster()'>"+
+     " tries ≥ "+
+     "<input id='pw-mx' type='number' min='1' max='100' step='1' value='"+mX()+
+     "' style='"+nsty+"' onchange='PW.setMaster()' onkeydown='if(event.key===\"Enter\")PW.setMaster()'></span>";
+   var fbar="<div style='display:flex;gap:12px;align-items:center;margin:10px 2px 4px;flex-wrap:wrap'>"+fbtn+frule+
      "<span class='hint'>showing "+shown.length+" of "+ms.length+"</span>"+
      "<span style='flex:1'></span>"+
      "<button class='btn small' onclick='PW.reset()' style='background:#3a2030;border-color:#5a2a3a;color:#ff9db0'>🗑 Reset history</button></div>";
    if(!ms.length){ el.innerHTML=summary+fbar+status+"<div class='card'>No words yet — add one above, or analyze a recording to auto-fill your blind spots.</div>"; return; }
    function hd(k,label,center){ var ar=SORT.key===k?(SORT.dir==='asc'?' ▲':' ▼'):'';
      return "<th onclick='PW.sort(\""+k+"\")' style='cursor:pointer"+(center?';text-align:center':'')+"'>"+label+ar+"</th>"; }
-   if(!shown.length){ el.innerHTML=summary+fbar+status+"<div class='card'>🎉 Every word is mastered (last 3 tries ≥ 85). Untick the filter to see them all.</div>"; return; }
+   if(!shown.length){ el.innerHTML=summary+fbar+status+"<div class='card'>🎉 Every word is mastered (last "+mN()+" tries ≥ "+mX()+"). Untick the filter to see them all.</div>"; return; }
    var rows=shown.map(function(m){
      return "<tr>"+
        "<td><b style='font-size:16px'>"+S.esc(m.word)+"</b></td>"+
@@ -1254,7 +1287,7 @@ _PRACTICE_JS = r"""
          "<button class='btn small' style='background:#1f3542' onclick='PW.del("+JSON.stringify(m.word)+")'>✕</button></td></tr>";
    }).join('');
    el.innerHTML=summary+fbar+status+"<table class='pwt'><tr>"+
-     hd('word','Word')+"<th>IPA</th>"+hd('avg',"Trend (avg · goal 85)")+hd('last','Last',1)+
+     hd('word','Word')+"<th>IPA</th>"+hd('avg',"Trend (avg · goal "+mX()+")")+hd('last','Last',1)+
      hd('best','Best',1)+hd('tries','Tries',1)+"<th></th></tr>"+rows+"</table>";
    fetchIPA(ms.map(function(m){return m.word;}));
  }
@@ -1319,6 +1352,21 @@ _PRACTICE_JS = r"""
      render(); },
    sort:function(k){ if(SORT.key===k){ SORT.dir=SORT.dir==='asc'?'desc':'asc'; } else { SORT.key=k; SORT.dir=(k==='word')?'asc':'desc'; } render(); },
    toggleMask:function(){ st().set('pw_hidemastered', !st().get('pw_hidemastered',false)); render(); },
+   setMaster:function(){
+     // Read both boxes together: they are one rule, and saving them separately
+     // makes a two-field edit re-render (and re-sort) halfway through.
+     var ni=document.getElementById('pw-mn'), xi=document.getElementById('pw-mx');
+     if(!ni||!xi) return;
+     // min/max on a number input is advisory -- typing 999 or clearing the box
+     // both get past it -- so clamp here rather than trusting the widget.
+     var n=Math.max(1, Math.min(MASTER_N_MAX, _int(ni.value, mN())));
+     var x=Math.max(1, Math.min(100, _int(xi.value, mX())));
+     st().set('pw_master_n', n); st().set('pw_master_min', x);
+     render();
+     var s=document.getElementById('pw-status');
+     if(s) s.innerHTML='Mastered now means <b>the last '+n+' tr'+(n===1?'y':'ies')+
+       ' ≥ '+x+'</b>. Nothing was re-scored — only which words count as done.';
+   },
    reset:function(){
      var all=st().get('ec_scores',{}); var n=0;
      Object.keys(all).forEach(function(k){ if(k.indexOf('word:')===0) n++; });

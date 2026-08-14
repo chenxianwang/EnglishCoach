@@ -37,7 +37,7 @@ this table — it's configuration, not training):
 | Panel | What it does |
 |---|---|
 | 📈 Summary & progress | average pronunciation score by week (speaking, reading passage, single word); improvement curves across pronunciation, accuracy, fluency, prosody; recurring blind spots; per-word drill list |
-| 🎯 Practice single word | say a word, get an instant Azure accuracy score — every attempt is logged so you can watch a specific word improve |
+| 🎯 Practice single word | say a word, get an instant Azure accuracy score — every attempt is logged so you can watch a specific word improve, and you set what counts as done ([details](#when-is-a-word-done)) |
 | 📖 Reading | reread the polished version of one of your own past recordings, scored against it |
 | 📋 Speaking error log | three tabs — the grammar log itself, **Grammar error by type stats**, and **Pronunciation error stats**; the two stats tabs show how often each sound and each type of mistake goes wrong, as a rate, and how that rate is moving week by week ([details](#error-rates-not-error-lists)) |
 | 🗣️ Speaking vocabulary | how much distinct vocabulary you actually produce, growth over time, and the words you're recycling |
@@ -249,6 +249,34 @@ photo ──────> vision LLM (Kimi, falling back to Claude) ─┬─> c
 | `mandarin_contrasts.json` | Mandarin-L1 specific pronunciation contrasts |
 | `daily_phrases.json` | high-frequency everyday phrases |
 | `Practice scripts/` | minimal-pair story texts for passage practice |
+
+## When is a word "done"?
+
+A word counts as **mastered** when its **last N attempts all scored X or
+better**, and both halves are yours to set — the two boxes sit beside the
+*Hide mastered* toggle on Practice single word. They default to **last 3 ≥ 85**.
+
+They are two genuinely different questions and neither one alone is enough. **N
+is how much consistency you want to prove**: at 1 a single lucky take clears a
+word, at 5 you have to hold it. **X is the bar itself** — 85 is Azure's
+comfortable-native range, 95 is unforgiving, 70 is "intelligible and moving on".
+Splitting them lets you drop the bar while demanding more consistency, or the
+reverse, instead of arguing with one number that means both.
+
+The rule is stated in the filter bar whether the filter is on or off, because it
+also defines the *mastered* count in the headline above it — a percentage whose
+definition is hidden inside a toggle is a percentage nobody can check.
+
+Changing either number **re-judges, it never re-scores**. Every attempt you have
+recorded keeps the score Azure gave it; raising the bar simply re-opens words
+that no longer clear it, and the trend goal line, the *Best*/*Last* colours and
+the progress bar all move with it. Nothing is lost by experimenting.
+
+Both values are clamped when read, not only when written, since they are stored
+server-side and can arrive from an older build or a hand-edited store. N below 1
+is the one that actually bites: `slice(-0)` returns the whole array in
+JavaScript, so an N of 0 would quietly test every attempt ever made and
+un-master almost everything.
 
 ## Azure usage
 

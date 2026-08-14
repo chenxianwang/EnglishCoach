@@ -6257,9 +6257,13 @@ def _pronscore_panel():
         "Single words still turn <b>prosody off</b> (meaningless for one word) and grade on <b>accuracy</b>; stories keep the full blended PronScore.</div>" % flag +
 
         "<h2 style='%s'>6 · The app’s own colour &amp; mastery rules</h2>" % h2 +
-        "<div style='%s'>Trend dots: <span style='color:var(--good)'>■ green ≥ 85</span> &nbsp; "
-        "<span style='color:%s'>■ yellow 75–84</span> &nbsp; <span style='color:var(--bad)'>■ red &lt; 75</span>.<br>"
-        "<b>Mastered</b> (Practice filter) = <b>last 3 attempts all ≥ 85</b>.<br>"
+        "<div style='%s'>Trend dots: <span style='color:var(--good)'>■ green</span> at or above your "
+        "goal &nbsp; <span style='color:%s'>■ yellow</span> within 10 points below it &nbsp; "
+        "<span style='color:var(--bad)'>■ red</span> under that.<br>"
+        "<b>Mastered</b> (Practice filter) = <b>the last N attempts all ≥ X</b>, and both numbers are "
+        "yours to set — the boxes sit beside the Hide-mastered toggle on Practice single word. "
+        "They default to <b>last 3 ≥ 85</b>. Raising X re-opens words you had cleared; nothing is "
+        "re-scored, only re-judged.<br>"
         "No hidden strictness curve on practice scores — 85 means a raw Azure 85.</div>" % (box, W) +
         "</section>")
 
