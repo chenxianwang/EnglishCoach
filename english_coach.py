@@ -3184,6 +3184,36 @@ _VOCAB_JS = (r"""
          "('"+String(o.k).replace(/'/g,"\\'")+"')\">"+S.esc(o.label)+
          " <span class='hint'>"+o.n+"</span></button>"; }).join('')+"</div>";
  }
+ // One bookmark for the whole list, so setting a new one is a plain overwrite.
+ // Stored by headword rather than by row index: the list is re-sorted, filtered
+ // and regrouped constantly, so a position would point somewhere else by the
+ // time you came back to it.
+ function markWord(){ var m=S.get('lex_mark',''); return typeof m==='string'?m:''; }
+ function markRow(){
+   var lc=markWord().toLowerCase(); if(!lc) return null;
+   // Scanned rather than queried: headwords contain apostrophes and spaces, and
+   // building a valid attribute selector out of them is more fragile than this.
+   var rows=body().querySelectorAll('tr[data-hw]');
+   for(var i=0;i<rows.length;i++){ if(rows[i].getAttribute('data-hw')===lc) return rows[i]; }
+   return null;
+ }
+ function scrollToMark(flash){
+   var row=markRow(); if(!row) return false;
+   row.scrollIntoView({block:'center'});
+   // Landing in the middle of 500 alphabetised rows with no cue leaves you
+   // hunting for the row you just jumped to.
+   if(flash){ row.style.transition='background .3s';
+     row.style.background='rgba(70,179,201,.28)';
+     setTimeout(function(){ row.style.background=''; },1500); }
+   return true;
+ }
+ function allmsg(t){ var p=document.getElementById('vx-allmsg'); if(p) p.textContent=t||''; }
+ function markBar(){
+   var m=markWord(); if(!m) return "";
+   return "<div class='bsfilter'><span class='hint'>Bookmarked: <b>"+S.esc(m)+"</b></span> "+
+     "<button class='btn small' onclick='VX.goMark()'>🔖 Go to bookmark</button> "+
+     "<button class='btn small' onclick='VX.clearMark()'>✕ Clear</button></div>";
+ }
  function hideBar(){
    var hid=S.get('lex_hidden',[])||[];
    if(!hid.length) return "";
@@ -3215,7 +3245,12 @@ _VOCAB_JS = (r"""
    var h='';
    Object.keys(by).sort().forEach(function(t){
      h+="<h2>"+S.esc(t)+" <span class='hint' style='font-weight:400'>"+by[t].length+"</span></h2>"+
-       "<table><tr><th>Word</th><th>Meaning</th><th>Example</th><th>From</th><th></th></tr>"+
+       // Wrapped in a scroll container, not left to the bare table: the action
+       // cell is nowrap and three buttons wide (➕ ✕ 🔖), and the global
+       // `table{overflow:hidden}` rule (there for rounded corners) clips
+       // whatever doesn't fit instead of scrolling to it — the bookmark button
+       // was rendering off the right edge with no way to reach it at all.
+       "<div style='overflow-x:auto'><table style='min-width:640px'><tr><th>Word</th><th>Meaning</th><th>Example</th><th>From</th><th></th></tr>"+
        by[t].map(function(x){
          var from = x.src==='photo'
            ? "<img src='"+S.esc(x.img)+"' title='"+S.esc(x.scenario+' · '+(x.d||''))+
@@ -3229,11 +3264,17 @@ _VOCAB_JS = (r"""
              "title='Remove from this list — the photo and the Coverage report keep it' "+
              "onclick=\"VX.hide('"+encodeURIComponent(x.headword)+"')\">&#10005;</button>"
            : "<button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button>";
-         return "<tr><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
+         var lc=(x.headword||'').toLowerCase();
+         var marked=markWord().toLowerCase()===lc;
+         act+=" <button class='btn small' title='"+(marked?'Remove this bookmark':
+             'Bookmark this row — replaces any bookmark you set earlier')+"'"+
+           (marked?" style='background:var(--accent);color:#08222b;border-color:var(--accent)'":"")+
+           " onclick=\"VX.mark('"+encodeURIComponent(x.headword)+"')\">🔖</button>";
+         return "<tr data-hw=\""+S.esc(lc)+"\"><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
            "</td><td class='hint'>"+S.esc(x.example||'')+"</td><td>"+from+
-           "</td><td style='text-align:right;white-space:nowrap'>"+act+"</td></tr>"; }).join('')+"</table>";
+           "</td><td style='text-align:right;white-space:nowrap'>"+act+"</td></tr>"; }).join('')+"</table></div>";
    });
-   body().innerHTML=hideBar()+scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
+   body().innerHTML=markBar()+hideBar()+scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
  window.VX={ flip:function(){var b=body().querySelector('.vxback'); if(b)b.style.display='block';},
    add:function(){var h=document.getElementById('vx-h').value.trim(); if(!h){document.getElementById('vx-msg').textContent='Headword required';return;}
      var it={id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,added:S.today(),srs:null};
@@ -3266,6 +3307,29 @@ _VOCAB_JS = (r"""
      all();
    },
    unhideAll:function(){ setHidden(function(){ return []; }); all(); },
+   // Tapping the row that is already bookmarked clears it; tapping any other
+   // row moves the bookmark there. There is only ever one.
+   mark:function(hw){
+     hw=decodeURIComponent(hw);
+     S.set('lex_mark', markWord().toLowerCase()===hw.toLowerCase() ? '' : hw);
+     all();
+     // The bar appearing above shifts everything down, so put the row you just
+     // tapped back under the cursor instead of leaving it scrolled off.
+     scrollToMark(false);
+   },
+   clearMark:function(){ S.set('lex_mark',''); all(); },
+   goMark:function(){
+     var m=markWord(); if(!m) return;
+     var lc=m.toLowerCase();
+     var hit=merged().filter(function(x){ return (x.headword||'').toLowerCase()===lc; })[0];
+     if(!hit){ allmsg('Bookmarked word “'+m+'” isn’t in this list any more — it was removed or '+
+       'deleted. Restore it, or clear the bookmark.'); return; }
+     // The bookmark can sit under a scenario the current filter excludes, and
+     // scrolling to a row that was never rendered does nothing at all.
+     if(SCFILTER!=='all' && hit.scenario!==SCFILTER){ SCFILTER='all'; all(); }
+     allmsg('');
+     if(!scrollToMark(true)) allmsg('Could not find that row — try Restore all.');
+   },
    showHidden:function(btn){
      var d=document.getElementById('vx-hidden'); if(!d) return;
      var on=d.style.display==='none';
