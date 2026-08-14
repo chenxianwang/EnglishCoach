@@ -753,7 +753,10 @@ python3 retro_slides.py 2026-08-13 16   # re-render just slide 16
 ```
 
 Images land in `retrospectives/<stem>-slides/`, named with the deck's own slide
-numbers so the folder reads in presentation order. A retrospective is one
+numbers so the folder reads in presentation order. That folder is **not
+committed** — the render is deterministic, so the document is the source and
+the images are a view of it. Run the command again rather than looking for them
+in a fresh clone. A retrospective is one
 continuous page, so *where a slide ends* is a decision the script makes: each
 `<article class="slide">` is a slide, the masthead splits into the cover and
 the contents page it carries, and a section divider gets no image of its own —
