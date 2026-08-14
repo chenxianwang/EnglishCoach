@@ -7649,6 +7649,279 @@ def _reading_vocab_panel(hidden=True):
 
 RETRO_DIR = "retrospectives"
 
+# The retrospective is a *document*, not an instrument, and it is styled to say
+# so: a serif display face and a paper-white column, against the panel typefaces
+# everything else in this dashboard uses. Two colours carry the whole argument --
+# `--sig` for what went wrong and `--meas` for what was measured -- so a table
+# says which of its rows is a finding and which is a failure without a legend.
+#
+# Every selector is scoped under `#retro`, for two independent reasons. It stops
+# the document's generic rules (`table`, `strong`, `td.num`) from reaching the
+# rest of the dashboard, and it lets the token block override `--card` and `--ink`
+# for this subtree only, so the dashboard's own `table{background:var(--card)}`
+# resolves to the document's paper rather than being fought with `!important`.
+_RETRO_CSS = """
+#retro{
+  --card:#152230; --ink:#eaf3f2; --ink-2:#c3d3da; --mute:#8fa6ad;
+  --rule:#25394a; --rule-soft:#1c2c39;
+  --sig:#ff9078;        /* correction red -- what I get wrong */
+  --meas:#5ecfb8;       /* instrument teal -- what is measured */
+  --sig-soft:#2b1c19; --meas-soft:#132b2c;
+  --shadow:0 1px 0 rgba(0,0,0,.25), 0 10px 26px -20px rgba(0,0,0,.9);
+  --display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  --body:'IBM Plex Sans',-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  font-family:var(--body);color:var(--ink);
+}
+#retro p{margin:0}
+#retro a{color:var(--meas)}
+#retro code{font-family:var(--mono);font-size:.92em}
+#retro strong{color:var(--ink);font-weight:600}
+
+/* the series index -- only rendered once there are two or more entries */
+#retro .rindex{display:flex;flex-wrap:wrap;gap:2px;align-items:stretch;margin:0 0 40px}
+#retro .rindex-h{flex:1 0 100%;font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mute);padding:0 0 10px}
+#retro .rindex a{flex:1 1 190px;padding:12px 14px;background:var(--card);
+  border:1px solid var(--rule-soft);text-decoration:none;color:var(--ink)}
+#retro .rindex a:hover,#retro .rindex a:focus-visible{border-color:var(--meas);outline:none}
+#retro .rindex a b{display:block;font-family:var(--mono);font-size:14px;letter-spacing:-.01em}
+#retro .rindex a span{display:block;font-size:11.5px;color:var(--mute);margin-top:3px}
+
+/* the dateline -- a monthly series has to say where in itself you are */
+#retro .rentry + .rentry{margin-top:96px}
+#retro .rdate{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+  padding:0 0 10px;border-bottom:1px solid var(--rule)}
+#retro .rdate b{font-family:var(--mono);font-size:13px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink)}
+#retro .rdate span{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--sig)}
+#retro .mast{padding:24px 0 36px;border-bottom:1px solid var(--rule);margin:0}
+#retro .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--meas);margin:0 0 20px}
+#retro .mast h1{font-family:var(--display);font-weight:400;font-size:clamp(32px,5.4vw,52px);
+  line-height:1.04;letter-spacing:-.015em;margin:0 0 18px;text-wrap:balance;max-width:16ch;border:0;padding:0}
+#retro .mast h1 em{font-style:italic;color:var(--sig)}
+#retro .dek{font-size:clamp(16px,2vw,19px);color:var(--ink-2);max-width:52ch;margin:0 0 32px;text-wrap:pretty}
+#retro .strip{display:flex;flex-wrap:wrap;gap:0;border-top:1px solid var(--rule-soft)}
+#retro .strip div{flex:1 1 130px;padding:14px 18px 14px 0;border-right:1px solid var(--rule-soft)}
+#retro .strip div:last-child{border-right:0}
+#retro .strip b{display:block;font-family:var(--mono);font-size:21px;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+#retro .strip span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+
+#retro .toc{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px;margin:36px 0 8px}
+#retro .toc a{display:block;padding:14px 16px;background:var(--card);
+  border:1px solid var(--rule-soft);text-decoration:none;color:var(--ink)}
+#retro .toc a:hover,#retro .toc a:focus-visible{border-color:var(--meas);outline:none}
+#retro .toc a span{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  color:var(--meas);text-transform:uppercase;margin-bottom:5px}
+#retro .toc a b{font-weight:600;font-size:15px}
+
+#retro .sec{margin:72px 0 0;display:flex;align-items:baseline;gap:16px;
+  border-bottom:2px solid var(--ink);padding-bottom:10px}
+#retro .sec .n{font-family:var(--mono);font-size:12px;color:var(--sig);letter-spacing:.1em}
+#retro .sec h2{font-family:var(--display);font-weight:400;font-size:clamp(23px,3.2vw,32px);
+  margin:0;letter-spacing:-.01em;border:0;padding:0}
+
+#retro .slide{background:var(--card);border:1px solid var(--rule-soft);box-shadow:var(--shadow);
+  margin:24px 0 0;padding:clamp(20px,3.2vw,34px);display:flex;flex-direction:column;gap:20px}
+#retro .slide > *{margin:0}
+#retro .slide-hd{display:flex;gap:14px;align-items:baseline;
+  border-bottom:1px solid var(--rule-soft);padding-bottom:14px}
+#retro .slide-hd .sn{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;
+  color:var(--mute);padding-top:4px;flex:0 0 auto;letter-spacing:.06em}
+#retro .slide-hd h3{font-family:var(--display);font-weight:400;font-size:clamp(20px,2.6vw,27px);
+  line-height:1.2;margin:0;letter-spacing:-.01em;text-wrap:balance}
+#retro .slide p{max-width:68ch;color:var(--ink-2)}
+#retro .slide p.lede{color:var(--ink);font-size:17px}
+#retro .slide ul,#retro .slide ol{max-width:68ch;color:var(--ink-2);padding-left:20px;
+  display:flex;flex-direction:column;gap:8px;margin:0}
+
+/* these three are <p> inside .slide, so they must out-specify `.slide p` on the
+   element as well as the class -- otherwise the statement block and the quotes
+   silently inherit body colour and the 68ch measure */
+#retro p.stmt{border-left:3px solid var(--sig);padding:6px 0 6px 22px;font-family:var(--display);
+  font-size:clamp(19px,2.7vw,26px);line-height:1.28;letter-spacing:-.01em;color:var(--ink);max-width:34ch}
+#retro .stmt .sub{display:block;font-family:var(--body);font-size:15px;line-height:1.55;
+  color:var(--mute);margin:12px 0 0;max-width:50ch;letter-spacing:0}
+#retro .finding{background:var(--meas-soft);border:1px solid var(--meas);
+  padding:clamp(18px,3vw,28px);display:flex;flex-direction:column;gap:16px}
+#retro .finding .tag{font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--meas)}
+#retro .finding h4{font-family:var(--display);font-weight:400;font-size:clamp(19px,2.6vw,26px);
+  line-height:1.25;margin:0;color:var(--ink);max-width:30ch}
+#retro .finding p{color:var(--ink-2);max-width:60ch;margin:0}
+#retro .split{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;
+  background:var(--meas);border:1px solid var(--meas)}
+#retro .split div{background:var(--card);padding:16px 18px}
+#retro .split h5{margin:0 0 6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--meas);font-weight:600}
+#retro .split p{margin:0;font-size:15px;color:var(--ink-2)}
+
+#retro .scroll{overflow-x:auto;border:1px solid var(--rule)}
+#retro table{border-collapse:collapse;width:100%;min-width:440px;font-size:14.5px;
+  background:var(--card);border-radius:0;margin:0}
+#retro caption{caption-side:top;text-align:left;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--mute);padding:10px 14px;
+  background:var(--card);border-bottom:1px solid var(--rule-soft)}
+#retro th{text-align:left;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--mute);font-weight:600;padding:10px 14px;border-bottom:1px solid var(--rule);
+  background:var(--card);white-space:nowrap}
+#retro td{padding:9px 14px;border-bottom:1px solid var(--rule-soft);color:var(--ink-2);
+  vertical-align:top;background:var(--card)}
+#retro tr:last-child td{border-bottom:0}
+#retro td.num,#retro th.num{text-align:right;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+#retro td.said{color:var(--sig)}
+#retro td.fix{color:var(--ink)}
+#retro .wrong{color:var(--sig);font-weight:600}
+#retro .right{color:var(--meas);font-weight:600}
+
+/* the one device the subject earns: every 0-100 accuracy score gets a bar */
+#retro td.meter{min-width:120px;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  text-align:right;white-space:nowrap}
+#retro td.meter i{display:block;height:3px;background:var(--meas);width:var(--v);
+  margin:0 0 4px auto;border-radius:0;opacity:.95}
+#retro td.meter.bad i{background:var(--sig)}
+#retro td.meter.warn i{background:var(--sig);opacity:.55}
+#retro td.meter b{font-weight:600;color:var(--ink);font-size:14px}
+
+/* corrections are audible -- the dashboard's global [data-say] handler speaks them */
+#retro [data-say]{cursor:pointer}
+#retro td.fix[data-say]:hover{background:var(--meas-soft)}
+#retro td.fix[data-say]::after{content:' \\1F50A';font-size:11px;color:var(--meas);opacity:0}
+#retro td.fix[data-say]:hover::after{opacity:1}
+#retro .quote-fix[data-say]:hover{color:var(--meas)}
+
+#retro .notes{border-top:1px solid var(--rule-soft);padding-top:16px;display:flex;gap:14px;align-items:flex-start}
+#retro .notes .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--sig);flex:0 0 auto;padding-top:3px}
+#retro .notes p{font-size:14.5px;color:var(--mute);max-width:70ch;margin:0}
+#retro .notes p + p{margin-top:10px}
+
+#retro .caveat{border:1px dashed var(--sig);background:var(--sig-soft);padding:14px 18px;
+  font-size:14px;color:var(--ink-2);max-width:72ch}
+#retro .caveat b{color:var(--sig)}
+#retro .ipa{font-family:var(--mono);color:var(--ink)}
+#retro p.quote-said{font-family:var(--display);font-size:clamp(18px,2.5vw,24px);line-height:1.3;
+  color:var(--sig);font-style:italic;max-width:26ch;margin:0}
+#retro p.quote-fix{font-family:var(--body);font-size:15px;color:var(--mute);margin:8px 0 0}
+#retro hr.soft{border:0;border-top:1px solid var(--rule-soft);margin:0}
+#retro .foot{margin-top:72px;padding-top:24px;border-top:1px solid var(--rule);
+  font-size:13px;color:var(--mute);font-family:var(--mono)}
+#retro a:focus-visible{outline:2px solid var(--meas);outline-offset:2px}
+@media (prefers-reduced-motion:no-preference){
+  #retro .toc a{transition:border-color .15s ease}
+}
+"""
+
+
+def _retrospective_files():
+    """The retrospective documents on disk, newest first.
+
+    Each is a hand-written HTML *fragment* -- body markup only, no <html> or
+    <style> -- living in `retrospectives/` beside this file and named with the
+    date it covers, so a plain reverse filename sort is a reverse date sort.
+    Keeping them as files rather than as Python string constants is the point:
+    a retrospective is a document you revise after re-reading it, and revising
+    it should not mean editing the program that renders it.
+    """
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), RETRO_DIR)
+    try:
+        names = [n for n in os.listdir(d) if n.endswith(".html")]
+    except OSError:
+        return []
+    return [os.path.join(d, n) for n in sorted(names, reverse=True)]
+
+
+_RETRO_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+                 "August", "September", "October", "November", "December")
+
+
+def _retro_dateline(path):
+    """(anchor id, month label, sort key) for one retrospective, from its name.
+
+    The filename is the timestamp, and it is the *only* timestamp trusted here.
+    A date written into the document can drift when the document is revised --
+    the filename cannot be edited by accident, and it is already what orders the
+    series. A file that doesn't start with a date still renders; it just labels
+    itself with its own stem and sorts to the front, which is visible enough to
+    be noticed and fixed.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    m = re.match(r"(\d{4})-(\d{2})(?:-(\d{2}))?", stem)
+    if not m:
+        return ("retro-" + re.sub(r"[^A-Za-z0-9]+", "-", stem).strip("-"),
+                stem, "")
+    year, mon = m.group(1), int(m.group(2))
+    label = "%s %s" % (_RETRO_MONTHS[mon - 1] if 1 <= mon <= 12 else m.group(2),
+                       year)
+    return ("retro-" + m.group(0), label, m.group(0))
+
+
+def _retro_title(doc):
+    """The document's own <h1>, as plain text, for the month index."""
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", doc, re.S | re.I)
+    if not m:
+        return ""
+    return " ".join(re.sub(r"<[^>]+>", "", m.group(1)).split())
+
+
+def _retro_panel(hidden=True):
+    """Periodic long-form review of everything the other panels measure.
+
+    The rest of the dashboard answers "how am I doing this week"; nothing in it
+    answers "what have I actually learned about my own English". That question
+    needs prose, and it needs to be written once and then left alone -- a report
+    that regenerates itself every page load is a chart, not a retrospective.
+
+    So the content is read verbatim from the files, deliberately unescaped: they
+    are local, hand-authored documents whose tables and callouts are the whole
+    value.
+
+    What the panel does add is the dateline, because this is a series written
+    roughly monthly and a series needs to say where in itself you are. Each
+    entry gets its month and its ordinal stamped above the document, both
+    derived from the filename so they cannot disagree with the ordering; and
+    once there is more than one entry, a month index appears at the top. Neither
+    exists for a single entry -- an index of one is furniture.
+    """
+    paths = _retrospective_files()
+    if not paths:
+        return ""
+    entries = []
+    for p in paths:
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = f.read()
+        except OSError:
+            continue
+        anchor, label, _ = _retro_dateline(p)
+        entries.append((anchor, label, _retro_title(doc), doc))
+    if not entries:
+        return ""
+
+    # newest first on the page; the ordinal counts up from the oldest, so
+    # No. 1 stays No. 1 forever however many are written after it
+    total = len(entries)
+    out = []
+    if total > 1:
+        out.append("<nav class='rindex'><span class='rindex-h'>Retrospectives</span>"
+                   + "".join(
+                       "<a href='#%s'><b>%s</b><span>No. %d%s</span></a>"
+                       % (a, _esc(lab), total - i, " · " + _esc(t) if t else "")
+                       for i, (a, lab, t, _d) in enumerate(entries))
+                   + "</nav>")
+    for i, (anchor, label, _t, doc) in enumerate(entries):
+        out.append("<article class='rentry' id='%s'>"
+                   "<div class='rdate'><b>%s</b><span>Retrospective No. %d</span></div>"
+                   "%s</article>" % (anchor, _esc(label), total - i, doc))
+    return ("<section id='retro' class='%s'><style>%s</style>%s</section>"
+            % ("tabpanel hidden" if hidden else "tabpanel",
+               _RETRO_CSS, "".join(out)))
+
+
 def _skill_panels(items):
     return (_SKILLS_UTIL_JS + _vocab_panel()
             + _photo_desc_panel()
@@ -7664,6 +7937,7 @@ def _skill_panels(items):
             + _reading_vocab_panel()
             + _listening_panel() + _register_panel() + _mandarin_panel()
             + _reading_panel(items) + _knowledge_panel() + _ed_panel() + _s_panel()
+            + _retro_panel()
             + _howto_panel()
             + _pronscore_panel())
 
@@ -7972,6 +8246,16 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     # Summary sits under the action-oriented views (or comes from the web nav).
     if "data-panel='summary'" not in extra_nav:
         nav += "<a data-panel='summary'%s>📈 Summary &amp; progress</a>" % acls("summary")
+    # Belongs immediately after Summary -- same question, longer window. Summary
+    # can arrive either from the block above or inside extra_nav (the web app
+    # builds its own sidebar head), so splice after whichever anchor is actually
+    # there rather than appending and landing behind the web app's action links.
+    if _retrospective_files():
+        _rlink = ("<a data-panel='retro'>🪞 Retrospective"
+                  "<small>the long view, in prose</small></a>")
+        _i = nav.find("data-panel='summary'")
+        _j = nav.find("</a>", _i) if _i >= 0 else -1
+        nav = (nav[:_j + 4] + _rlink + nav[_j + 4:]) if _j >= 0 else (_rlink + nav)
     nav += "<a data-panel='grammar'>📋 Speaking error log</a>"
     # The daily loop: what you produce, listening practice, what you missed,
     # what you took in. Kept above the first section header so they stay

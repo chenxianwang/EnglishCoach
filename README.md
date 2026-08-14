@@ -31,7 +31,12 @@ vocabulary capture call an API.
 The app is a single dashboard with **21 training panels** organised around
 what you're working on, plus a **Setting Panel** for API keys, prompts and
 login (covered under [API keys](#api-keys) and [Login](#login) below, not in
-this table — it's configuration, not training):
+this table — it's configuration, not training).
+
+One panel sits outside the tables below because it cuts across all of them:
+**🪞 Retrospective** (directly under Summary & progress in the sidebar), a
+dated, roughly monthly series of long-form written reviews of everything the
+other panels measure — see [Retrospectives](#retrospectives).
 
 ### Speaking
 | Panel | What it does |
@@ -664,6 +669,79 @@ I've met this", not "photos still on disk", so a word can read ×3 from photos
 that no longer exist. The ledger folds in anything it doesn't recognise on
 first view, which makes the same routine both the migration and a self-repair.
 
+## Retrospectives
+
+Every other panel answers *how am I doing this week*. None of them answers
+*what have I actually learned about my own English* — that question needs
+prose, an argument, and a human deciding which of forty numbers matter. So the
+🪞 **Retrospective** panel is the one part of the dashboard that is written
+rather than computed.
+
+It's written on roughly a monthly cadence, so the panel is a **dated series**
+that grows: each month's report is a separate file, all of them are on the one
+page, newest at the top.
+
+Each retrospective is an HTML **fragment** — body markup only, no `<html>` and
+no `<style>` — in `retrospectives/`, and **the filename must start with the
+date it covers**, `YYYY-MM-DD`:
+
+```
+retrospectives/2026-08-13-first-51-days.html
+retrospectives/2026-09-14-month-two.html
+```
+
+That date is the only timestamp the app trusts, and it drives three things: the
+reverse-chronological order, the month stamped above the document
+(*September 2026*), and the anchor (`#retro-2026-09-14`). A date written *into*
+the document would drift the first time the document was revised; a filename
+doesn't. Anything after the date is a free-text slug, ignored.
+
+Above each document the panel stamps its **dateline** — the month, plus
+`Retrospective No. N` counting up from the oldest, so No. 1 stays No. 1 however
+many are written after it. Once there are two or more entries, a **month
+index** appears at the top of the panel with each entry's month, number and
+headline, linking down to it. Neither the index nor a `<h1>` you didn't write
+appears for a single entry — an index of one is furniture.
+
+A file that doesn't start with a date still renders; it just labels itself with
+its own filename stem and sorts to the front, which is conspicuous enough to
+notice and rename. If the directory is empty or missing, the panel and its nav
+entry both disappear.
+
+Everything below the dateline is the fragment, inserted verbatim and
+deliberately unescaped: these are local hand-authored documents whose tables
+and callouts *are* the value.
+
+Keeping them as files rather than Python constants is the point. A
+retrospective is a document you revise after re-reading it, and revising it
+should not mean editing the program that renders it.
+
+**Writing one.** Don't repeat the month in the document — the dateline already
+carries it. Use the fragment's own `.kicker` for the coverage detail instead
+(*"Covering 54 recordings · 2026-06-24 → 2026-08-13"*), and give it an `<h1>`,
+which is what the month index shows as the entry's headline.
+
+The stylesheet is `_RETRO_CSS` in `english_coach.py`, scoped
+entirely under `#retro`, and it gives you a small vocabulary of blocks:
+`.mast` / `.kicker` / `.dek` / `.strip` (masthead and headline figures),
+`.toc`, `.sec` (section rule), `.slide` (a card), `.slide-hd`, `p.lede`,
+`p.stmt` (pull statement), `.finding` and `.split` (a measured result and its
+two sides), `.caveat`, `.notes` (speaker notes), `p.quote-said` /
+`p.quote-fix`, and `.scroll` + `table` with `td.num`, `td.said`, `td.fix`,
+`.wrong` / `.right`, and `td.meter` for a 0–100 score with an inline bar.
+
+Two colours carry the whole argument — `--sig` for what went wrong, `--meas`
+for what was measured — so a table row reads as a finding or a failure without
+a legend. Headings are set in a serif; the rest of the dashboard is not. That
+contrast is deliberate: this panel is a document, and it should not look like
+an instrument.
+
+**Corrections are audible.** Any `td.fix` or `p.quote-fix` whose text is a
+real sentence gets a `data-say` attribute, which the dashboard's global speech
+handler picks up — click the right-hand column of any correction table to hear
+the fixed version. The spoken text is not the cell's markup: the editorial
+note in a trailing `<span>` is dropped, `<b>` emphasis is unwrapped, and a
+leading ellipsis is trimmed, because all three are for the eye.
 ## Design notes
 
 A few decisions that are less obvious than they look:
