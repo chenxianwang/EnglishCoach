@@ -337,7 +337,9 @@ def api_azure_usage():
     except (TypeError, ValueError):
         allowance = 0.0
     try:
-        return jsonify(ec.azure_usage_summary(LIBRARY, allowance_hours=allowance))
+        return jsonify(ec.azure_usage_summary(
+            LIBRARY, allowance_hours=allowance,
+            billing_since=cfg.get("azure_billing_since", "")))
     except Exception as e:                             # noqa: BLE001
         return jsonify(error=str(e)[:150], hours=0, allowance_hours=allowance)
 
@@ -496,6 +498,12 @@ def _persist_keys_from_form(form):
             keys["azure_allowance_hours"] = max(0.0, float(raw))
         except (TypeError, ValueError):
             pass
+    # The day the resource stopped being free. Blank is meaningful here — it
+    # means "bill everything" — so unlike the keys above, an empty box is
+    # stored rather than ignored. A date input only ever posts ISO or "".
+    since = str(form.get("azure_billing_since", "")).strip()
+    if "azure_billing_since" in form:
+        keys["azure_billing_since"] = since
     save_config({**cfg, **keys})
     return keys
 
@@ -632,6 +640,10 @@ def _settings_panel(msg="", active=""):
           <label style='display:block;margin-top:6px'>Monthly audio allowance
             <input type='number' name='azure_allowance_hours' value='%s' min='0' step='0.5'
               style='width:90px'> hours</label>
+          <label style='display:block;margin-top:6px'>Billing started
+            <input type='date' name='azure_billing_since' value='%s'>
+            <span class='hint'>· the day you left the free tier; blank = always
+              billed</span></label>
           <p class='hint' style='margin:4px 0 0'>Azure has no API that reports
             remaining quota, so the meter on the analysis page counts what
             <b>this app</b> sends and subtracts it from this number. Set it to
@@ -639,8 +651,14 @@ def _settings_panel(msg="", active=""):
             audio hours; check the
             <a href='https://azure.microsoft.com/pricing/details/speech-services/'
                target='_blank' rel='noopener' style='color:var(--accent)'>pricing
-            page</a> for your tier. <b>0</b> = pay-as-you-go: usage is still
-            shown, but nothing is presented as a limit.</p>
+            page</a> for your tier.</p>
+          <p class='hint' style='margin:4px 0 0'><b>0</b> = Standard (S0) /
+            pay-as-you-go. There is no free block on that tier — you are billed
+            from the first second — so the meter switches from hours remaining
+            to <b>estimated spend</b>, at this deployment's rates. It is an
+            estimate of what this app costs you, not a reading of your invoice,
+            and it cannot see anything else using the same key. Azure's own
+            Cost Management is the authority; set a budget alert there.</p>
           <p class='hint' style='margin:10px 0 4px'>Grammar analysis — provide ONE key. If both are set, DeepSeek is used.</p>
           <label style='display:block;margin-top:6px'>DeepSeek key <span class='hint'>· recommended — cheaper &amp; reachable from China (used by default)</span>
             <input type='password' name='deepseek_key' placeholder="%s" style='width:100%%'></label>
@@ -673,6 +691,7 @@ def _settings_panel(msg="", active=""):
       <p class='hint' style='margin-top:16px'><a href='/logout' style='color:var(--accent)'>Log out</a></p>
     </section>
     """ % (note, ph(akey), aregion, cfg.get("azure_allowance_hours", 5),
+           html.escape(str(cfg.get("azure_billing_since", "")), quote=True),
            ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage))
 
 
@@ -825,6 +844,10 @@ def _form_panel(msg="", active=""):
         // Azure publishes no "remaining quota" endpoint, so this counts what
         // this app has sent. Failing silently is right: an unreachable meter
         // must not imply you are out of quota.
+        // Two modes, decided by the allowance in Settings: a free tier has a
+        // block to run down, a Standard one has a bill to watch. Showing hours
+        // remaining on Standard would be worse than showing nothing -- it
+        // counts toward a limit that does not exist.
         (function(){
           var box=document.getElementById('az-usage'); if(!box) return;
           fetch('/api/azure_usage',{cache:'no-store'}).then(function(r){return r.json();})
@@ -842,7 +865,27 @@ def _form_panel(msg="", active=""):
                   '<div style="height:100%%;width:'+pct.toFixed(0)+'%%;border-radius:5px;background:'+col+'"></div>'+
                 '</div>';
             } else {
-              line += '<div style="margin-top:5px;opacity:.75">no monthly allowance set</div>';
+              // Standard (S0): no balance to run down, so the number that
+              // means anything is money. The pace line is only drawn when the
+              // API sends one -- it omits it early in the month, where one
+              // long session projects to noise.
+              var tip=(d.billed_hours||0).toFixed(2)+' billable h at $'+
+                      (d.rate_usd_per_hour||0).toFixed(2)+'/h, plus $'+
+                      (d.prosody_usd_per_hour||0).toFixed(2)+
+                      '/h on analyses. An estimate, not your invoice.';
+              // Only worth saying in the month you switched tiers, where it
+              // explains a gap between the audio above and the money below.
+              // Every month after, it excludes nothing and is just noise.
+              if(d.billing_since && d.cost_usd < d.full_cost_usd)
+                tip+=' Audio before '+d.billing_since+
+                     ' was on the free tier and is not counted.';
+              line += '<div style="margin-top:5px" title="'+tip+'">est. <b>$'+
+                      (d.cost_usd||0).toFixed(2)+'</b> billed this month</div>';
+              // Pace comes from the whole month's audio, not just the billed
+              // part -- the question it answers is "what does this habit
+              // cost", which the tier you were on last week doesn't change.
+              if(d.pace_usd) line += '<div style="opacity:.75;margin-top:2px">~$'+
+                      d.pace_usd.toFixed(2)+'/mo at this pace</div>';
             }
             line += "<div style='margin-top:5px;font-size:11.5px;opacity:.6'>counted by this app"+
                     (d.seeded?" · history estimated":"")+"</div>";

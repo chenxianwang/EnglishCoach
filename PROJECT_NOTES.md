@@ -253,9 +253,91 @@ persisted via the same server-side progress store, key
   caller passes through — measuring the converted wav, into
   `VideoAudioFiles/azure_usage.json` (seeded from existing results on first
   read, those rows flagged `seeded`). Allowance is `azure_allowance_hours` in
-  `~/.english_coach.json`; **0 means pay-as-you-go and must not render as a
-  limit**. Never label this "your Azure quota" — it is blind to other users of
-  the same key, and the UI has to keep saying "counted by this app".
+  `~/.english_coach.json`; **0 means Standard/pay-as-you-go and must not render
+  as a limit**. Never label this "your Azure quota" — it is blind to other users
+  of the same key, and the UI has to keep saying "counted by this app".
+- **The meter has two modes and they measure different things.** On a free
+  tier there is a block to run down, so it shows hours remaining. On Standard
+  (allowance 0) there is no block — billing starts at the first second — so it
+  shows estimated spend, and showing hours-remaining there would count toward
+  a limit that does not exist. Rates are `AZURE_USD_PER_HOUR` ($1.00) plus
+  `AZURE_PROSODY_USD_PER_HOUR` ($0.30) on `AZURE_PROSODY_KINDS` only, which is
+  `("analysis",)` because that is the one path passing `enable_prosody=True`.
+  If a new caller ever turns prosody on, it must be added to that tuple or the
+  estimate silently under-reports.
+- **`AZURE_MIN_BILLED_SECONDS = 10` is a measurement, not a documented rule.**
+  Azure billed 16,850 s against this ledger's 14,426 s over an identical
+  window (1.168x); a flat ten-second per-call floor reproduces that to within
+  2%, and nothing else tried did. It matters because 321 of 362 August calls
+  were ~5 s practice drills — without the floor the estimate is out by a
+  third. Re-measure it against the portal if the two ever drift apart; do not
+  treat it as fixed.
+- **`azure_billing_since` exists because the tier-switch month lies without
+  it.** Audio sent before you left the free tier is real usage — it belongs in
+  the hours — but it cost nothing, so it must not reach the money. Switching
+  on 2026-08-10 with the whole month counted gave $5.97 against a real $0.88.
+  Blank means "always billed". Compare on `t[:10] >= since`, never on the raw
+  strings: ledger stamps carry a time and the setting does not, so
+  `"2026-08-10" > "2026-08-10T14:03:00"` is false and the switch day silently
+  drops out.
+- **Two costs, on purpose.** `cost_usd` respects `billing_since` and is what
+  you owe; `full_cost_usd` ignores it, and the *at this pace* figure derives
+  from that one. "What does this habit cost per month" should not change
+  answer because of which tier you were on last week.
+- **The Practice mastery rule is user-set, and read through `mN()`/`mX()`.**
+  "Mastered" = last **N** attempts all ≥ **X**, stored in SkillStore as
+  `pw_master_n` / `pw_master_min` (defaults 3 and 85), edited from two number
+  inputs in the filter bar of `_PRACTICE_JS`. Nothing may hardcode 3 or 85
+  again: `isMastered`, the trend goal line, the dot colours, `num()`, the table
+  header and the empty state all derive from those two functions. **Clamp on
+  read, not just on write** — the values are server-backed and can arrive from
+  an older build or a hand-edited store, and `a.slice(-0)` returns the *whole*
+  array in JavaScript, so an N of 0 would test every attempt ever made rather
+  than none. `min`/`max` on a number input is advisory (typing 999 or clearing
+  the box both get past it), so `setMaster` clamps too. Colour bands hang off
+  X and keep their original widths (green ≥ X, amber ≥ X−10 in the trend,
+  X−15 in `num()`), so the default X=85 renders exactly as it always did.
+- **Never let `azure_pronunciation` throw away a cancellation reason.** The
+  `canceled` handler used to be `lambda e: done.append(True)`, so Azure
+  declining — expired key, exhausted free tier, a tier change still
+  propagating — produced exactly what silence produces: no words, every metric
+  `None`. The practice route then blamed the recording ("may be silent, cut
+  off, or a different word"), which cost a real debugging session on
+  2026-08-10, when the true cause was the F0 quota running out mid-evening.
+  The handler now records `reason`/`code`/`detail` and the result carries
+  `azure_fault` (Azure refused) and `no_speech` (Azure heard nothing) as
+  separate fields. Callers must branch on them: only claim the recording is at
+  fault when Azure actually said so. `CancellationReason.EndOfStream` is the
+  normal end of a file and is not a fault.
+- **A refusal is retried; an auth failure is not.** Changing a resource's
+  pricing tier propagates across Azure's nodes over minutes to hours, and
+  while it does the same key alternates between nodes that know the new tier
+  and nodes still enforcing the old one. Measured on 2026-08-10 as an exact
+  50/50 alternation — "Quota exceeded" (error 1007) and a clean 100, back to
+  back, six calls running. `azure_pronunciation` now runs up to 3 attempts,
+  rebuilding **both** the recognizer and the `AudioConfig` each time (an
+  AudioConfig is consumed by the recognition it feeds and will not rewind).
+  `_permanent()` stops the loop for credential errors, because three 13-second
+  timeouts is a terrible way to learn your key is wrong — match on the message
+  text, never on a bare "401"/"403", since Azure appends a hex SessionId that
+  contains those digits by chance.
+- **Usage is logged after a successful transcription, not before the attempt.**
+  `log_azure_usage` used to fire immediately after the wav conversion, so every
+  refused request inflated the ledger with audio Azure never processed and
+  never billed. It now runs only `if words`. With retries this matters twice
+  over: three attempts must not log three times.
+- **A 5 h F0 month ends without warning, and mid-session.** The ledger's own
+  numbers crossed 5 h at 19:03 on 2026-08-10 (with the 10 s floor applied);
+  every call after that failed until the S0 switch propagated, which took
+  minutes to hours as Microsoft documents. If Azure suddenly stops scoring,
+  check the cumulative billed hours for the month *before* suspecting the
+  audio path.
+- **`_deepseek_chat` retries transport failures only.** One TLS reset in 47
+  August calls cost an analysis its whole grammar section, because there was
+  no retry at all. Three attempts, 1.5s then 3s, covering connection failures,
+  truncated bodies, and 429/5xx. **Never retry a 4xx** — that is a bad key, a
+  bad model name or a malformed request, and retrying only reports the same
+  error two round trips later.
 - **Speaking error log is three tabs** (`log` / `gstats` / `pstats` in
   `_GRAMMAR_JS`). "Log a mistake" is no longer a tab — it is a toggle button
   on the log itself (`addBar()`), so the feature survived the restructure.

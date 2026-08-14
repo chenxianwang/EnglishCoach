@@ -261,7 +261,9 @@ that reports what you *used*, never what remains. Nothing in the whole metric
 table exposes an allowance.
 
 So the app meters itself. Every call into `azure_pronunciation` measures the
-audio it is about to send and appends it to `VideoAudioFiles/azure_usage.json`.
+audio it sends and appends it to `VideoAudioFiles/azure_usage.json` — but only
+once Azure has actually transcribed it. A refused request is never billed, so
+counting it would overstate usage exactly when something is already wrong.
 Because the metering sits inside that one function, it catches every consumer —
 speaking analysis, single-word practice, reading, and the phoneme backfill —
 and tags each with what spent it. On first read the ledger is seeded from the
@@ -280,11 +282,56 @@ counted by this app · history estimated
 Set your monthly allowance in **Setting Panel → Monthly audio allowance**. The
 free F0 tier is commonly 5 audio hours per month, but check the
 [pricing page](https://azure.microsoft.com/pricing/details/speech-services/)
-for your own tier. Setting it to **0** means pay-as-you-go: usage is still
-reported, and nothing is presented as a limit.
+for your own tier.
+
+Setting it to **0** means Standard (S0) / pay-as-you-go, and the meter changes
+what it measures. There is no free block on that tier — billing starts at the
+first second — so counting hours against an allowance would count toward a
+limit that does not exist. It reports estimated spend instead:
+
+```
+4.41 h sent to Azure in 2026-08 (362 calls)
+est. $0.88 billed this month
+~$18.52/mo at this pace
+counted by this app · history estimated
+```
+
+Three things go into that estimate. Speech-to-text bills **$1.00 per audio
+hour**, prosody assessment adds **$0.30 per hour** and is requested on full
+analyses only (not practice drills or the backfill), and Azure appears to bill
+a **floor of about ten seconds per call** — measured by holding this ledger
+against the account's own `AudioSecondsTranscribed` over the same window,
+where 14,426 s sent came back as 16,850 s billed. Short drills are what make
+that floor matter: a five-second practice word bills as ten. The rates are
+regional, read from Azure's retail price API for `eastus`.
+
+**Setting Panel → Billing started** is the day the resource left the free
+tier. Audio before it still counts toward the hours, because you really did
+send it, but not toward the money, because it was free. Without that date the
+month you switch tiers reports a whole month of free audio as billed — for
+this project that was $5.97 against a real $0.88, wrong by nearly 7×. Leave it
+blank if the resource has always been paid.
+
+The two costs answer different questions and are computed separately: what you
+owe respects that date, while the *at this pace* figure deliberately ignores
+it and extrapolates the whole month's audio. "What does this habit cost" is
+not a question the tier you were on last week should change the answer to.
+
+**When Azure refuses, the app says so.** A refusal and a silent microphone look
+identical from inside the SDK — no words, every score `None` — so the
+cancellation reason is captured and reported rather than discarded, and the
+"check your recording" message is only shown when Azure actually blamed the
+recording. Refusals are also retried up to three times, because a tier change
+propagates across Azure's nodes over minutes to hours, and during that window
+the same key alternates between nodes that know the new tier and nodes still
+enforcing the old one — measured here as an exact 50/50 alternation between
+*Quota exceeded* and a clean score. A credential error is not retried: three
+timeouts is a poor way to learn your key is wrong.
 
 The honest caveat, which the meter states on its own face: this counts what
-*this app* sent. Anything else using the same Azure key is invisible to it.
+*this app* sent. Anything else using the same Azure key is invisible to it,
+the estimate is not a reading of your invoice, and Azure's Cost Management is
+the only authority on what you actually owe. Set a budget alert there.
 
 ## Error rates, not error lists
 

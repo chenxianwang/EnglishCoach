@@ -1200,6 +1200,30 @@ def apply_strictness(az, level="strict"):
 
 USAGE_FILE = "azure_usage.json"
 
+# Standard-tier rates in US dollars per audio hour, read from Azure's retail
+# price API for eastus on 2026-08-10:
+#     "S1 Speech To Text"                        $1.00 / hr
+#     "S1 Speech to Text Enhanced Feature Audio" $0.30 / hr
+# The portal calls the tier Standard S0 while the billing meters are named S1;
+# they are the same thing. Rates vary by region, so these are this
+# deployment's numbers rather than universal ones.
+AZURE_USD_PER_HOUR = 1.00
+AZURE_PROSODY_USD_PER_HOUR = 0.30
+
+# Prosody assessment is requested on the analysis path only (see
+# `azure_pronunciation`'s `enable_prosody`), so only those seconds pay the
+# enhanced-feature add-on. Practice drills and the phoneme backfill do not.
+AZURE_PROSODY_KINDS = ("analysis",)
+
+# Azure bills for more audio than we send. Measured against the account's own
+# "Audio Seconds Transcribed" metric over an identical window, this ledger's
+# 14,426 s came back as 16,850 s billed (1.168x), and a flat ten-second floor
+# per call reproduces Azure's figure to within 2%. Short drills are what make
+# it matter: a 5 s practice word bills as ten. This is an observed fit, not a
+# documented Azure rule — if the portal and this estimate drift apart, this
+# constant is the first thing to re-measure.
+AZURE_MIN_BILLED_SECONDS = 10.0
+
 
 def _wav_seconds(path):
     """Length of a PCM wav, in seconds. 0 if it cannot be read."""
@@ -1281,32 +1305,79 @@ def log_azure_usage(seconds, kind="analysis", library=None):
         pass
 
 
-def azure_usage_summary(library=None, allowance_hours=0, month=None):
+def azure_usage_summary(library=None, allowance_hours=0, month=None,
+                        billing_since=None):
     """This month's Azure audio, against whatever allowance you have.
 
-    `allowance_hours` of 0 means "no cap set" — pay-as-you-go, or simply not
-    configured. The summary then reports usage and stays quiet about what is
-    left, rather than inventing a limit.
+    `allowance_hours` of 0 means "no cap set" — a Standard (S0) resource, where
+    there is no free block to run out of and the meaningful number is money.
+    The summary then reports estimated spend instead of a remaining balance,
+    rather than inventing a limit.
+
+    `billing_since` (an ISO date) is the day the resource actually started
+    costing money — the day it left the free tier. Audio before it is real
+    usage and is counted in the hours, but it was free, so it must not be
+    counted in the spend. Without this the month you switch tiers reports the
+    whole month's audio as billed and overstates by roughly an order of
+    magnitude, which is precisely the kind of wrong number this meter exists to
+    stop showing.
+
+    Two costs come back and they answer different questions. `cost_usd` is what
+    you are on the hook for. `full_cost_usd` is what this month's audio would
+    cost at these rates regardless of when billing started, which is the honest
+    basis for "what does this habit cost" — so the pace figure derives from it.
+
+    Estimated is the operative word throughout: this applies the region rates
+    and the observed per-call floor to the calls *this app* made, and is blind
+    to anything else on the same key. Expect it near the invoice, not on it.
     """
     rows = read_azure_usage(library)
     month = month or date.today().strftime("%Y-%m")
-    sec, by_kind, seeded = 0.0, {}, False
+    since = str(billing_since or "").strip()
+    sec, billed, cost, full_cost = 0.0, 0.0, 0.0, 0.0
+    by_kind, seeded, calls = {}, False, 0
     for r in rows:
-        if not str(r.get("t", "")).startswith(month):
+        t = str(r.get("t", ""))
+        if not t.startswith(month):
             continue
         s = float(r.get("sec") or 0)
-        sec += s
         k = r.get("kind") or "analysis"
+        b = max(s, AZURE_MIN_BILLED_SECONDS)
+        rate = AZURE_USD_PER_HOUR + (AZURE_PROSODY_USD_PER_HOUR
+                                     if k in AZURE_PROSODY_KINDS else 0.0)
+        this = b / 3600.0 * rate
+        sec += s
+        calls += 1
+        full_cost += this
+        # Compare on the date alone: ledger stamps carry a time, `since` does
+        # not, and "2026-08-10" > "2026-08-10T14:03:00" is false the moment you
+        # compare the full strings.
+        if not since or t[:10] >= since:
+            billed += b
+            cost += this
         by_kind[k] = round(by_kind.get(k, 0) + s, 1)
         seeded = seeded or bool(r.get("seeded"))
     hours = sec / 3600.0
     out = {"month": month, "seconds": round(sec, 1), "hours": round(hours, 2),
-           "by_kind": by_kind, "seeded": seeded, "calls":
-           sum(1 for r in rows if str(r.get("t", "")).startswith(month)),
-           "allowance_hours": allowance_hours or 0}
+           "by_kind": by_kind, "seeded": seeded, "calls": calls,
+           "allowance_hours": allowance_hours or 0,
+           "billed_hours": round(billed / 3600.0, 2),
+           "cost_usd": round(cost, 2),
+           "full_cost_usd": round(full_cost, 2),
+           "billing_since": since,
+           "rate_usd_per_hour": AZURE_USD_PER_HOUR,
+           "prosody_usd_per_hour": AZURE_PROSODY_USD_PER_HOUR}
     if allowance_hours:
         out["remaining_hours"] = round(max(0.0, allowance_hours - hours), 2)
         out["pct"] = round(min(100.0, 100.0 * hours / allowance_hours), 1)
+    # Pace, but only once there is enough month behind us to divide by: on the
+    # 2nd, one long session extrapolates to a number that is pure noise. Past
+    # months are already complete, so a projection there would be nonsense.
+    today = date.today()
+    if month == today.strftime("%Y-%m") and today.day >= 5:
+        import calendar
+        days = calendar.monthrange(today.year, today.month)[1]
+        out["pace_usd"] = round(full_cost * days / today.day, 2)
     return out
 
 
