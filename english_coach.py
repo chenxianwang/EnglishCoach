@@ -2907,16 +2907,27 @@ window.SkillStore=(function(){
  function logScore(key,score){ var h=get('ec_scores',{});
    (h[key]=h[key]||[]).push({s:score,d:today(),i:uid()+Date.now().toString(36)});
    set('ec_scores',h); }
+ // A session you TIMED rather than scored. Same history list as logScore so the
+ // weekly cards count it, but deliberately no `s`: there is no Azure score
+ // here, and inventing one would move an average that is read as real.
+ // Everything downstream therefore has to tolerate a row with no `s`.
+ function logTime(key,secs){ var h=get('ec_scores',{});
+   (h[key]=h[key]||[]).push({t:Math.round(secs),d:today(),i:uid()+Date.now().toString(36)});
+   set('ec_scores',h); }
  function scores(key){ return (get('ec_scores',{})[key])||[]; }
- function spark(key){ var a=scores(key); if(!a.length) return "<span class='hint'>no attempts yet</span>";
+ function spark(key){ var all=scores(key);
+   var a=all.filter(function(x){return x&&typeof x.s==='number';});
+   var timed=all.length-a.length;
+   var tnote=timed?(' · '+timed+' timed'):'';
+   if(!a.length) return "<span class='hint'>"+(timed?timed+' timed read'+(timed>1?'s':'')+', not scored':'no attempts yet')+"</span>";
    var last=a[a.length-1].s, best=Math.max.apply(null,a.map(function(x){return x.s;}));
    var bars=a.slice(-12).map(function(x){var col=x.s>=85?'#43c59e':x.s>=70?'#ffb454':'#ff6b6b';
      return "<i style='display:inline-block;width:6px;height:"+Math.max(3,Math.round(x.s/100*22))+"px;background:"+col+";margin-right:2px;vertical-align:bottom;border-radius:1px'></i>";}).join('');
-   return "<span style='display:inline-flex;align-items:flex-end'>"+bars+"</span> <span class='hint' style='margin-left:6px'>best "+best+" · last "+last+" · "+a.length+" tries</span>"; }
+   return "<span style='display:inline-flex;align-items:flex-end'>"+bars+"</span> <span class='hint' style='margin-left:6px'>best "+best+" · last "+last+" · "+a.length+" tries"+tnote+"</span>"; }
  // warm up the voice list so the first Play isn't silent
  try{ window.speechSynthesis && window.speechSynthesis.getVoices();
    if(window.speechSynthesis) window.speechSynthesis.onvoiceschanged=function(){window.speechSynthesis.getVoices();}; }catch(_){}
- return {get:get,set:set,update:update,today:today,addDays:addDays,esc:esc,uid:uid,schedule:schedule,speak:speak,norm:norm,logScore:logScore,scores:scores,spark:spark};
+ return {get:get,set:set,update:update,today:today,addDays:addDays,esc:esc,uid:uid,schedule:schedule,speak:speak,norm:norm,logScore:logScore,logTime:logTime,scores:scores,spark:spark};
 })();
 // generic TTS play via data-say (shared across skill panels)
 document.addEventListener('click',function(e){
@@ -5794,41 +5805,117 @@ _READING_JS = r"""
  var S=window.SkillStore;
  function all(){ return window.READING_ITEMS||[]; }
  function body(){ return document.getElementById('reading-body'); }
- function bestScore(key){ var a=S.scores(key); return a.length?Math.max.apply(null,a.map(function(x){return x.s;})):null; }
+ // Timed reads live in the same history list with no `s`, so every consumer of
+ // it here has to drop them before doing arithmetic — a NaN best score would
+ // silently break the 90+ filter.
+ function scored(key){ return S.scores(key).filter(function(x){return x&&typeof x.s==='number';}); }
+ function bestScore(key){ var a=scored(key); return a.length?Math.max.apply(null,a.map(function(x){return x.s;})):null; }
  function hideHigh(){ return S.get('reading_hide90',false); }
+ function byId(id){ var a=all(); for(var i=0;i<a.length;i++){ if(a[i].id===id) return a[i]; } return null; }
+ function fmt(s){ var m=Math.floor(s/60), r=s-m*60; return m+':'+(r<10?'0':'')+r; }
+ // Reading you timed instead of scoring. Kept in a module-level map rather than
+ // on the button element: render() rebuilds the whole list (Hide, the 90+
+ // filter), and a timer parked on a discarded node would tick on forever
+ // against a detached element and lose the elapsed time you were in the middle
+ // of measuring.
+ var RUNNING={}, TICK=null;
+ function paint(){
+   var ids=Object.keys(RUNNING);
+   ids.forEach(function(id){
+     var b=document.querySelector('.rtimer[data-id="'+id+'"]');
+     if(b) b.textContent='■ Stop '+fmt(Math.round((Date.now()-RUNNING[id])/1000));
+   });
+   if(!ids.length && TICK){ clearInterval(TICK); TICK=null; }
+ }
+ function startTick(){ if(!TICK) TICK=setInterval(paint,1000); }
+ function openCard(card){
+   var detail=card.querySelector('.reading-detail'), btn=card.querySelector('[aria-expanded]');
+   if(!detail||detail.style.display!=='none') return;
+   detail.style.display=''; btn.textContent='▾ Collapse'; btn.setAttribute('aria-expanded','true');
+ }
+ // Passages put away by hand. The 90+ filter only knows about scores, so a
+ // passage you're simply done with (or never wanted) had no way to leave the
+ // list. Persisted, unlike SHOWN — the reveal is a peek, not a setting.
+ function hiddenMap(){ var h=S.get('reading_hidden',{}); return (h&&typeof h==='object')?h:{}; }
+ var SHOWN=false;
  function render(){
    var el=body(); if(!el)return;
    var full=all();
-   var hide=hideHigh();
+   var hide=hideHigh(), man=hiddenMap();
+   var manCount=0, autoCount=0;
    var list=full.map(function(s,i){return {s:s,i:i};}).filter(function(o){
+     if(man[o.s.id]){ manCount++; return SHOWN; }
      if(!hide) return true;
-     var b=bestScore('reading:'+o.s.id); return !(b!=null && b>=90); });
-   var hiddenCount=full.length-list.length;
+     var b=bestScore('reading:'+o.s.id);
+     if(b!=null && b>=90){ autoCount++; return false; }
+     return true; });
+   var notes=[];
+   if(manCount) notes.push(manCount+(SHOWN?' shown from hidden':' hidden by you'));
+   if(autoCount) notes.push(autoCount+' hidden (score ≥ 90)');
    var toggleBtn="<button class='btn small' onclick='READ.toggleHideHigh()' style='"+
      (hide?'background:var(--accent);color:#08222b;border-color:var(--accent)':'')+"'>"+
      (hide?'☑':'☐')+" Hide passages scoring 90+</button>";
-   var controls=full.length>1 ? "<div style='display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px;flex-wrap:wrap'>"+
-     (hiddenCount?"<span class='hint' style='margin-right:auto'>"+hiddenCount+" hidden (score ≥ 90)</span>":"")+
-     toggleBtn+
+   var revealBtn=manCount?"<button class='btn small' onclick='READ.toggleShown()'>"+
+     (SHOWN?'🙈 Put them back':'👁 Show hidden')+"</button>":"";
+   var controls=(full.length>1||manCount) ? "<div style='display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px;flex-wrap:wrap'>"+
+     (notes.length?"<span class='hint' style='margin-right:auto'>"+notes.join(' · ')+"</span>":"")+
+     revealBtn+toggleBtn+
      "<button class='btn small' onclick='READ.expandAll(true)'>Expand all</button><button class='btn small' onclick='READ.expandAll(false)'>Collapse all</button></div>" : "";
    var cards = list.length? list.map(function(o,idx){
      var s=o.s, i=o.i;
      var key='reading:'+s.id;
      var open=idx===0;
-     return "<div class='card reading-card' data-reading='"+i+"'><div style='display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center'>"+
-       "<div><b>"+S.esc(s.name)+"</b><div class='hint'>"+S.esc(s.when||'')+" · polished from your recording</div></div><span>"+
+     var off=!!man[s.id];
+     return "<div class='card reading-card' data-reading='"+i+"'"+(off?" style='opacity:.55'":"")+"><div style='display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center'>"+
+       "<div><b>"+S.esc(s.name)+"</b><div class='hint'>"+S.esc(s.when||'')+" · polished from your recording"+(off?' · hidden':'')+"</div></div><span>"+
        "<button class='btn small' onclick='READ.toggle("+i+")' aria-expanded='"+(open?'true':'false')+"'>"+(open?'▾ Collapse':'▸ Expand')+"</button> "+
        "<button class='btn small' data-say=\""+S.esc(s.text)+"\">🔊 Listen</button> "+
        "<button class='btn small strec' data-key=\""+S.esc(key)+"\" data-ref=\""+S.esc(s.text)+"\">● Read &amp; score</button> "+
-       "<button class='btn small' onclick='READ.use("+i+")'>↗ Read in speaking analysis</button>"+
+       "<button class='btn small rtimer"+(RUNNING[s.id]?' on':'')+"' data-id=\""+S.esc(s.id)+"\" "+
+       "title='Time yourself reading this — logged to the week without another Azure analysis'>"+
+       (RUNNING[s.id]?'■ Stop '+fmt(Math.round((Date.now()-RUNNING[s.id])/1000)):'⏱ Record time')+"</button> "+
+       "<button class='btn small' onclick='READ.setHidden("+i+","+(off?'false':'true')+")' title='"+
+       (off?'Put this passage back in the list':'Hide this passage without scoring it')+"'>"+(off?'↩ Unhide':'🚫 Hide')+"</button>"+
        "</span></div>"+
        "<div class='reading-detail' style='"+(open?'':'display:none;')+"'>"+
        "<div class='sthist' style='margin-top:6px'>"+S.spark(key)+"</div>"+
        "<span class='stmsg hint'></span>"+
        "<p style='white-space:pre-wrap;margin-top:8px'>"+S.esc(s.text)+"</p></div></div>";
-   }).join('') : (full.length? "<div class='card'><b>All passages scoring 90+ are hidden.</b><p class='hint'>Untick the filter above to see them.</p></div>" : "<div class='card'><b>No polished readings yet.</b><p class='hint'>Analyze an uploaded recording with grammar/word-choice feedback enabled. Its polished version will appear here automatically.</p></div>");
+   }).join('') : (full.length? "<div class='card'><b>Every passage is hidden.</b><p class='hint'>"+
+       (manCount&&autoCount?'Tap “Show hidden”, or untick the 90+ filter.':manCount?'Tap “Show hidden” above to bring them back.':'Untick the filter above to see them.')+
+       "</p></div>" : "<div class='card'><b>No polished readings yet.</b><p class='hint'>Analyze an uploaded recording with grammar/word-choice feedback enabled. Its polished version will appear here automatically.</p></div>");
    el.innerHTML=controls+cards;
+   if(Object.keys(RUNNING).length) startTick();
  }
+ // Time spent on a passage, logged without scoring it. The polished text came
+ // out of a recording that was already analysed once; re-running the whole
+ // analysis on it costs Azure seconds and tells you nothing new, but the time
+ // you spend re-reading it is still practice the weekly card should see.
+ document.addEventListener('click',function(e){
+   var b=e.target.closest && e.target.closest('.rtimer'); if(!b) return;
+   var id=b.getAttribute('data-id'), card=b.closest('.card');
+   var msg=card.querySelector('.stmsg'), hist=card.querySelector('.sthist');
+   var key='reading:'+id;
+   if(RUNNING[id]){
+     var secs=Math.round((Date.now()-RUNNING[id])/1000);
+     delete RUNNING[id]; paint();
+     b.classList.remove('on'); b.textContent='⏱ Record time';
+     // A double-tap on Start would otherwise write a 0-second read into a
+     // history with no way to delete a single entry.
+     if(secs<5){ msg.textContent='Only '+secs+'s — too short to log.'; return; }
+     S.logTime(key,secs);
+     var s=byId(id), words=s?s.text.trim().split(/\s+/).length:0;
+     var wpm=words?Math.round(words/(secs/60)):0;
+     msg.innerHTML="Logged <b>"+fmt(secs)+"</b>"+(wpm?" · about "+wpm+" wpm":"")+
+       " <span class='hint'>— counted in this week’s Reading Passage</span>";
+     hist.innerHTML=S.spark(key);
+     return;
+   }
+   RUNNING[id]=Date.now(); startTick();
+   b.classList.add('on'); b.textContent='■ Stop 0:00';
+   openCard(card);   // you cannot read a passage that is collapsed
+   msg.textContent='Timing this read — tap Stop when you reach the end.';
+ });
  // record whole-story reading -> Azure score -> log to history
  document.addEventListener('click',function(e){
    var b=e.target.closest && e.target.closest('.strec'); if(!b) return;
@@ -5858,9 +5945,15 @@ _READING_JS = r"""
    expandAll:function(open){ document.querySelectorAll('.reading-card').forEach(function(card){
      var detail=card.querySelector('.reading-detail'), btn=card.querySelector('[aria-expanded]');
      detail.style.display=open?'':'none'; btn.textContent=open?'▾ Collapse':'▸ Expand'; btn.setAttribute('aria-expanded',open?'true':'false'); }); },
-   use:function(i){ var s=all()[i]; if(!s)return; var t=document.getElementById('transcript'); if(t){ t.value=s.text; }
-     var a=document.querySelector('a[data-panel=newrec]'); if(a){ a.click(); window.scrollTo(0,0); } },
-   toggleHideHigh:function(){ S.set('reading_hide90', !hideHigh()); render(); }
+   toggleHideHigh:function(){ S.set('reading_hide90', !hideHigh()); render(); },
+   // update(), not set(): CACHE was hydrated at page load, so a tab left open
+   // while you hid something on the phone would otherwise POST its stale map
+   // and resurrect it.
+   setHidden:function(i,on){ var s=all()[i]; if(!s)return;
+     S.update('reading_hidden',{},function(h){ h=(h&&typeof h==='object')?h:{};
+       if(on) h[s.id]=true; else delete h[s.id]; return h; }, true);
+     render(); },
+   toggleShown:function(){ SHOWN=!SHOWN; render(); }
  };
  if(document.getElementById('reading-body')) render();
 })();
@@ -7083,28 +7176,42 @@ _WEEKLY_PRACTICE_JS = r"""
    });
    return m;
  }
+ function stat(v,l){ return "<span><b style='font-size:23px'>"+v+"</b><span class='hint'> "+l+"</span></span>"; }
  function report(prefix, label, noun, scores, w){
    var start=w.start, anchor=w.anchor, prevStart=w.prevStart, prevEnd=w.prevEnd;
-   var rows=[], previous=[], ids={};
+   var rows=[], previous=[], ids={}, timed=0, secs=0;
    Object.keys(scores||{}).forEach(function(key){
      if(key.indexOf(prefix)!==0) return;
      (scores[key]||[]).forEach(function(x){
-       if(!x || typeof x.s!=='number' || !x.d) return;
-       if(x.d>=start && x.d<=anchor){ rows.push({s:x.s,key:key}); ids[key]=1; }
-       if(x.d>=prevStart && x.d<=prevEnd) previous.push({s:x.s,key:key});
+       if(!x || !x.d) return;
+       // Two kinds of row now: scored (Azure gave a number) and timed (you read
+       // it and logged how long). A timed row is real practice, so it moves
+       // attempts and coverage — but it has no score and must never touch the
+       // average, the best, or the week-on-week delta.
+       var isScored=typeof x.s==='number';
+       if(!isScored && typeof x.t!=='number') return;
+       if(x.d>=start && x.d<=anchor){
+         ids[key]=1;
+         if(isScored) rows.push({s:x.s,key:key}); else { timed++; secs+=x.t; }
+       }
+       if(isScored && x.d>=prevStart && x.d<=prevEnd) previous.push({s:x.s,key:key});
      });
    });
-   var range="<div class='hint' style='margin-top:8px'>"+pretty(start)+" – "+pretty(anchor)+"</div>";
-   if(!rows.length) return "<div class='card'><b>"+label+"</b><p class='hint'>No "+noun+
+   if(!rows.length && !timed) return "<div class='card'><b>"+label+"</b><p class='hint'>No "+noun+
      " practised between "+pretty(start)+" and "+pretty(anchor)+".</p></div>";
-   var avg=mean(rows), old=mean(previous), delta=old==null?'—':(avg-old>0?'+':'')+(avg-old);
-   var best=Math.max.apply(null,rows.map(function(x){return x.s;}));
+   var range="<div class='hint' style='margin-top:8px'>"+pretty(start)+" – "+pretty(anchor)+
+     (timed?" · "+timed+" timed read"+(timed>1?'s':'')+", not scored":"")+"</div>";
+   var avg=mean(rows), old=mean(previous);
+   var delta=(avg==null||old==null)?'—':(avg-old>0?'+':'')+(avg-old);
+   var best=rows.length?Math.max.apply(null,rows.map(function(x){return x.s;})):null;
+   var mins=secs?Math.max(1,Math.round(secs/60)):0;
    return "<div class='card'><b>"+label+"</b><div style='display:flex;gap:18px;flex-wrap:wrap;margin-top:10px'>"+
-     "<span><b style='font-size:23px'>"+rows.length+"</b><span class='hint'> attempts</span></span>"+
-     "<span><b style='font-size:23px'>"+avg+"</b><span class='hint'> average</span></span>"+
-     "<span><b style='font-size:23px'>"+best+"</b><span class='hint'> best</span></span>"+
-     "<span><b style='font-size:23px'>"+Object.keys(ids).length+"</b><span class='hint'> "+noun+" this week</span></span>"+
-     "<span><b style='font-size:23px'>"+delta+"</b><span class='hint'> vs. previous week</span></span></div>"+
+     stat(rows.length+timed,'attempts')+
+     stat(avg==null?'—':avg,'average')+
+     stat(best==null?'—':best,'best')+
+     stat(Object.keys(ids).length, noun+' this week')+
+     stat(delta,'vs. previous week')+
+     (mins?stat(mins,'min read'):'')+"</div>"+
      range+"</div>";
  }
  window.addEventListener('load',function(){
