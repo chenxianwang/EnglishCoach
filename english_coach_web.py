@@ -611,7 +611,12 @@ def _prompt_form(name, cfg):
 
 def _settings_panel(msg="", active=""):
     """The Setting Panel — API keys and related config, split out of the
-    analysis form so a key can be saved without uploading a recording."""
+    analysis form so a key can be saved without uploading a recording.
+
+    Backup/restore lives here too. `_backup_card` was written for the Summary
+    tab, never wired into one, and sat unreachable: it is housekeeping rather
+    than progress, and this is the panel you already open when you move the app
+    to a new machine."""
     cfg = load_config()
     akey = os.environ.get("AZURE_SPEECH_KEY") or cfg.get("azure_key", "")
     aregion = os.environ.get("AZURE_SPEECH_REGION") or cfg.get("azure_region", "eastus")
@@ -688,11 +693,13 @@ def _settings_panel(msg="", active=""):
            🔒 Update password</button>
       </form>
       %s
+      %s
       <p class='hint' style='margin-top:16px'><a href='/logout' style='color:var(--accent)'>Log out</a></p>
     </section>
     """ % (note, ph(akey), aregion, cfg.get("azure_allowance_hours", 5),
            html.escape(str(cfg.get("azure_billing_since", "")), quote=True),
-           ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage))
+           ph(dkey), ph(ankey), ph(kkey), prompt_forms, storage,
+           ec._backup_card()))
 
 
 def _load_items_and_history():

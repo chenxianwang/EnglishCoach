@@ -2825,6 +2825,11 @@ _DASHBOARD_JS = """
     if(msg) msg.textContent = '';
     fetch('/backup').then(function(r){
       if(!r.ok) throw new Error('server returned ' + r.status);
+      // An expired session 302s to /login, which fetch follows and reports as a
+      // perfectly good 200 -- without this you'd "download" the login page under
+      // a .zip name and only find out when you tried to restore from it.
+      if(r.redirected && /\\/login/.test(r.url))
+        throw new Error('your session expired — reload the page, log in, and try again');
       var n = r.headers.get('X-Backup-Files') || '?';
       var fn = r.headers.get('X-Backup-Name') || 'english-coach-backup.zip';
       return r.blob().then(function(blob){ return {blob:blob, n:n, fn:fn}; });
@@ -2879,6 +2884,11 @@ _DASHBOARD_JS = """
       fetch('/api/progress', {method:'POST', headers:{'Content-Type':'application/json'},
                               body: JSON.stringify(body)}).then(function(r){
         if(!r.ok) throw new Error('server returned ' + r.status);
+        // Same trap as the backup fetch, and worse: a 302 turns this POST into a
+        // GET of /login that answers 200, so "restored" would be a flat lie and
+        // the file you just picked would never reach the server.
+        if(r.redirected && /\\/login/.test(r.url))
+          throw new Error('your session expired — reload the page, log in, and try again');
         if(msg) msg.textContent = '✓ Restored ' + keys.length + ' entries — reloading…';
         setTimeout(function(){ location.reload(); }, 900);
       }).catch(function(err){
@@ -10670,12 +10680,12 @@ new analyses need the corresponding piece.
 1. Unzip somewhere sensible, e.g. `~/Desktop/English Coach`
 2. `pip install -r requirements.txt`
 3. `python english_coach_web.py` → http://localhost:8000
-4. Restore your practice history: open **Summary & progress**, click
+4. Restore your practice history: open the **Setting Panel**, click
    **Restore practice data**, and choose `VideoAudioFiles/progress.json` from
    this zip. This pushes it to the server (`POST /api/progress`), replacing
    whatever's already there — it's no longer trapped in one browser's storage.
-5. Optional: re-enter your Azure and DeepSeek keys in **New analysis** to run
-   new recordings.
+5. Optional: re-enter your Azure and DeepSeek keys in the **Setting Panel**
+   to run new recordings.
 
 ## Sanity check
 
