@@ -1284,7 +1284,7 @@ _PRACTICE_JS = r"""
        "<td style='text-align:right;white-space:nowrap'>"+
          "<button class='btn small' data-say=\""+S.esc(m.word)+"\">🔊</button> "+
          "<button class='btn small rec pwrec' data-word=\""+S.esc(m.word)+"\">● Rec</button> "+
-         "<button class='btn small' style='background:#1f3542' onclick='PW.del("+JSON.stringify(m.word)+")'>✕</button></td></tr>";
+         "<button class='btn small pwdel' style='background:#1f3542' data-word=\""+S.esc(m.word)+"\">✕</button></td></tr>";
    }).join('');
    el.innerHTML=summary+fbar+status+"<table class='pwt'><tr>"+
      hd('word','Word')+"<th>IPA</th>"+hd('avg',"Trend (avg · goal "+mX()+")")+hd('last','Last',1)+
@@ -1301,6 +1301,14 @@ _PRACTICE_JS = r"""
      st().set('pw_ipa',IPA); _ipaBusy=false; render();
    }).catch(function(){ miss.forEach(function(w){ IPA[w.toLowerCase()]=''; }); _ipaBusy=false; });
  }
+ // Delete carries the word in a data- attribute rather than an inline
+ // onclick argument. JSON.stringify escapes " and \\ but not ', so a word like
+ // "don't" or "let's" closed the single-quoted onclick attribute early and the
+ // browser silently dropped the handler -- those rows could never be removed.
+ document.addEventListener('click',function(e){
+   var b=e.target.closest && e.target.closest('.pwdel'); if(!b)return;
+   window.PW.del(b.getAttribute('data-word'));
+ });
  document.addEventListener('click',function(e){
    var b=e.target.closest && e.target.closest('.pwrec'); if(!b)return;
    var word=b.getAttribute('data-word'); var key='word:'+word.toLowerCase(); var status=document.getElementById('pw-status');

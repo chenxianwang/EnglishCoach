@@ -669,6 +669,40 @@ I've met this", not "photos still on disk", so a word can read ×3 from photos
 that no longer exist. The ledger folds in anything it doesn't recognise on
 first view, which makes the same routine both the migration and a self-repair.
 
+**So the long lists are paged.** Both *Never spoken, never heard* and the **All**
+tab passed 600 rows inside two months, and every row carries a photo thumbnail,
+so rendering either one whole was an unreadable page and several hundred images
+built on every visit. Each shows **30 rows a page**, ordered as before, with a
+filter box for going straight to a word. Paging re-renders the list alone — the
+ledger derivation, the coverage percentages, and the scenario chips above it are
+untouched, and what you typed in the filter survives.
+
+The same treatment is on the **Listening error log** and the **Reading
+vocabulary** gap list, which grow for the same reason. All four read their page
+size from one place — `window.EC_PAGE`, defined in the shared store script that
+every panel loads before it runs — so changing how many rows a page holds is a
+single edit rather than four. Whatever reorders a list resets it to page 1
+(re-sorting the error log, switching tab in Reading vocabulary, changing the
+scenario filter), because page 8 of the old order is not a meaningful place to
+still be standing; whatever merely removes a row (skipping a word, marking one
+studied, hiding one) leaves you where you were and clamps if the list got short.
+
+The All tab is grouped by word type, and it is paged **as one list** rather than
+one pager per group: the groups are wildly uneven — 347 collocations against 11
+idioms — so per-group pagers would put a bar under headings that don't need one
+and still leave the big group unreadable. Type headings are emitted inside the
+page wherever the type changes, and a group carried over from the previous page
+is marked `· continued`, so a heading never reads like the top of a group you
+are halfway down. Heading counts come off the *filtered* list, so a heading
+never promises more rows than paging on from there would reach.
+
+One interaction had to follow the pagination: the row bookmark. **Go to
+bookmark** scrolled to a `tr` in the rendered table, and a paged list renders
+only 100 of them — the bookmark is usually on another page, and scrolling to a
+row that was never rendered does nothing at all. It now locates the bookmark by
+*index* in the flat list, clears whatever is hiding it (a scenario filter, the
+find box), turns to the page that index falls on, and only then scrolls.
+
 ## Retrospectives
 
 Every other panel answers *how am I doing this week*. None of them answers
@@ -850,11 +884,32 @@ yields a monotone index, pitch range, speaking rate, pause ratio, and an nPVI
 rhythm score — the metric that distinguishes stress-timed English from
 syllable-timed Mandarin. No librosa, no PyTorch.
 
-**Mandarin-L1 specificity.** The analysis prompt names the predictable
-interference patterns directly — tense/aspect drift, dropped articles,
-word-final consonant deletion, initial /r/, /θ ð/ → /s z/, dark /l/,
-sentences losing weight at the end — and asks for root causes rather than a
-flat list of errors.
+**Mandarin-L1 specificity, without leading the model.** The analysis prompt
+lists the predictable interference patterns — tense/aspect drift, dropped
+articles, word-final consonant deletion, initial /r/, /θ ð/ → /s z/, dark /l/,
+sentences losing weight at the end — but only as a vocabulary for *explaining*
+an error already found and quoted. An earlier version ranked them ("tense/aspect
+drift — the #1 issue") and got what it asked for: on a recording whose tenses
+were uniformly correct, the model reported tense drift anyway, and pronunciation
+patterns citing mis-transcriptions that were not in the transcript. Naming the
+expected answer next to the evidence is enough to produce it.
+
+Three rules keep the report honest, and they generalise past this app:
+
+- **Quotes must be verbatim.** Every `example` / `evidence` / `said` string has
+  to appear in the transcript character for character. This is checkable after
+  the fact, and it is the one rule that kills invented pronunciation findings —
+  the model reads text and cannot hear the audio, so a correctly spelled word is
+  no evidence of anything. Real per-phoneme scores come from Azure and are
+  printed beside the model's section.
+- **Empty is a valid answer.** `blind_spots` means a habit — the same mistake
+  twice in *this* transcript, each with its own quote. Most single recordings
+  have none, so the prompt says an empty list is the normal output. Without
+  that, a section that must be filled gets filled, and two unrelated errors are
+  filed under one plausible heading to make a pair.
+- **The fix must follow from the evidence.** A remedy that contradicts its own
+  quotes ("use past simple consistently", under two quotes already in past
+  simple) is the visible symptom of a label chosen before the evidence.
 
 ## Progress tracking
 

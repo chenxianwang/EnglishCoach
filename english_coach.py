@@ -224,23 +224,38 @@ life-and-death. Coach him like a capable peer, not a beginner. Frame every
 mistake as data — a "game record" to review — and prefer ROOT-CAUSE thinking:
 if several errors share one underlying cause, say so and group them.
 
-Analyze this spoken-English transcript from a recording. It may contain
-speech-to-text errors; a mis-transcribed word is a SIGNAL about his production —
-treat it as a likely PRONUNCIATION problem and name the sound (e.g. "math" heard
-as "mass" = /θ/→/s/; "rope" heard as "lobes" = weak word-initial /r/).
+Analyze this spoken-English transcript from a recording.
 
-Apply the Mandarin-L1 lens — his errors are largely predictable, so name the root
-cause when relevant:
-- Tense/aspect drift (Mandarin doesn't inflect verbs for tense) — the #1
-  grammar-in-motion issue under real-time speaking pressure.
-- Dropped articles (a/the have no direct Mandarin equivalent).
-- Word-final consonants & clusters, word-initial /r/, /θ ð/→/s z/, /ɜː/ with
-  r-coloring, /v/, and dark /l/.
-- Stress-timing: sentences trail off or lose weight at the end.
+EVIDENCE DISCIPLINE — this matters more than covering every section:
+- Every string you put in 'example', 'evidence', 'examples' or 'said' must appear
+  in the transcript character for character. Copy it across; do not paraphrase it,
+  tidy it up, or reconstruct what you assume he must have said.
+- Report only what this transcript shows. A short report on a clean recording is a
+  correct report. Never fill a section to make the analysis look thorough.
+- If you cannot support a point with an exact quote, drop the point.
+
+The transcript may contain speech-to-text errors, and a mis-transcribed word is a
+SIGNAL about his production — treat it as a likely PRONUNCIATION problem and name
+the sound (e.g. 'math' heard as 'mass' = /θ/→/s/; 'rope' heard as 'lobes' = weak
+word-initial /r/). But you are reading text, not listening to audio: claim this
+ONLY when the wrong word is actually sitting in the transcript in front of you. A
+correctly spelled word tells you nothing about how it sounded. Real pronunciation
+scores are measured separately and printed beside your section, so inventing a
+mishearing is the worst thing you can do here — he will go and drill a sound that
+was never wrong. An empty 'pronunciation_patterns' list is a fine answer.
+
+Mandarin-L1 patterns are common in his English, and naming a root cause helps when
+one is genuinely there: tense/aspect drift (Mandarin doesn't inflect verbs for
+tense), dropped articles, word-final consonants and clusters, word-initial /r/,
+/θ ð/→/s z/, /ɜː/ with r-coloring, /v/, dark /l/, and sentences that lose weight at
+the end. Use this list ONLY to explain an error you have already found and quoted.
+Never rank these in advance, never go hunting for them, and never relabel an error
+as one of them because it is the expected mistake — in practice his errors are
+often collocation, idiom and word choice, which are nowhere on this list.
 
 Return ONLY valid JSON with this exact shape:
 {
-  "level_estimate": "e.g. B2 (reaching C1)",
+  "level_estimate": "e.g. B1 (reaching B2) / B2 (reaching C1) / C1 / C1 (reaching C2) / C2",
   "overall_summary": "2-3 sentence summary",
   "top_fixes": [
     {"issue":"short label of the single most impactful thing to change",
@@ -262,12 +277,37 @@ Return ONLY valid JSON with this exact shape:
   "polished": "a clean, natural rewrite of the whole thing the speaker can rehearse"
 }
 
-Rules for the new fields:
-- "top_fixes": the 3 highest-impact changes, ordered most important first. Prioritise
-  things that hurt clarity or sound unnatural to a listener over tiny slips.
-- "blind_spots": only patterns that recur (appear 2+ times or are clearly systematic
-  for a Chinese-L1 speaker). If nothing recurs, return an empty list.
-- Be specific and quote the learner's own words in "example" / "evidence".
+Rules for the fields:
+- "overall_summary": where he is and what to spend the next session on. Name one
+  thing that genuinely worked — a structure, a connective, a mid-sentence repair —
+  and quote it. Not encouragement for its own sake: he needs to know which of his
+  habits are already paying, or he will drop them along with the mistakes.
+- "top_fixes": the 3 highest-impact changes, most important first. Rank by what the
+  error costs a LISTENER, not by how easy it is to name. Something that changes or
+  reverses his meaning outranks something that merely sounds foreign, which
+  outranks a small slip. A missing negation, or a wrong verb inside a fixed phrase,
+  is always a top fix — it sends the listener the opposite way and they will not
+  know to ask.
+- "blind_spots": a HABIT, not an error. Include a pattern only if the same
+  underlying mistake appears at least twice IN THIS TRANSCRIPT, each with its own
+  exact quote. Most single recordings contain no such pattern, so an empty list is
+  the normal and correct answer — far better than a plausible-sounding one. Never
+  file two unrelated errors under one heading to reach two examples, and never
+  write a 'fix' that your own quotes contradict: if the evidence shows consistent
+  past simple, tense drift is not what you are looking at. Recurring filler and
+  connective habits do count and are worth catching — most sentences opening with
+  'So' or 'and then', restarts and abandoned clauses, the same intensifier every
+  time. Use kind 'fluency' for those.
+- "grammar": actual rule violations, with the rule stated in one line.
+- "word_choice": this is where his biggest remaining gains are. He is past basic
+  correctness; what still marks him as non-native is collocation and idiom — the
+  wrong verb with the right noun (you BEAT a player, you WIN a match), a
+  preposition English does not use there, a phrase carried over from Mandarin word
+  by word. Prefer what a native speaker would actually say over what is merely
+  grammatical, and name the register when it matters.
+- "polished": keep his content, his order and his voice. This is his own passage
+  made native, not your rewrite of his topic — fix the errors, cut the filler,
+  leave the rest recognisably his, so that rehearsing it is rehearsing himself.
 
 CRITICAL OUTPUT RULES — the response must be strictly valid JSON:
 - Do NOT put a double-quote character (") inside any string value. If you must quote
@@ -1755,6 +1795,360 @@ def _drill_words(p):
     return out[:10]
 
 
+#: How many weak words one report lists. Ten is a practice session; a longer
+#: list stops being a set of targets and turns back into the transcript.
+WEAKEST_SHOWN = 10
+
+
+def _weak_sound(w):
+    """The single lowest-scoring phoneme inside one spoken word.
+
+    Azure scores every phoneme, not only the word, so "rest scored 23" can be
+    narrowed to "the final /t/ scored 25" — which is a drill, where the word
+    score alone is only a complaint. Position is carried too: the same
+    consonant is a different problem at the end of a word than at the start,
+    and word-final stops are exactly what a Mandarin speaker drops.
+
+    {} when Azure returned no per-phoneme scores (older recordings, and any
+    word it declined to break down).
+    """
+    phones, pacc = w.get("phones") or [], w.get("pacc") or []
+    if len(pacc) != len(phones):
+        return {}
+    scored = [(s, i) for i, s in enumerate(pacc) if s >= 0]
+    if not scored:
+        return {}
+    score, i = min(scored)
+    raw = re.sub(r"\d", "", (phones[i] or "").upper())
+    # `_stat_phone` folds Azure's schwa onto AH so the sound statistics count
+    # one vowel rather than two; here it must not, because AH prints as /ʌ/ and
+    # the sound actually graded was /ə/.
+    arpa = _stat_phone(raw)
+    ipa = (_ARPA2IPA_WEAK.get(_SFIX.get(raw, raw), "") if raw in ("AX", "AXR")
+           else "") or _ARPA2IPA.get(arpa, arpa.lower())
+    return {"ipa": ipa, "score": score,
+            "pos": "final" if i == len(phones) - 1 else
+                   ("initial" if i == 0 else "middle")}
+
+
+def weakest_words(az, limit=WEAKEST_SHOWN):
+    """The lowest-scoring words in one Azure result, worst first.
+
+    `pronunciation_patterns` is the *inferred* half of the pronunciation
+    section: the model reads a transcript, so it can only name a sound when the
+    recognizer visibly misheard a word, and on a clean recording it correctly
+    reports nothing. That is the right behaviour and it leaves the section
+    empty — on a recording where Azure scored every word individually. The
+    measurement was taken and then not shown.
+
+    This is the measured half, and it never comes back empty while Azure has
+    scores: some word is always the weakest, and which one is the whole point.
+
+    Repeats are grouped, because "said 'played' four times, mean 12" is a
+    target while a lone "played 0" may be one bad alignment. Ranking is by the
+    mean for the same reason — a single fluke must not outrank a word that is
+    weak every time it is said.
+
+    Omissions and insertions are dropped: an omitted word was never spoken and
+    an inserted one was not in the script, so neither score describes how
+    anything actually sounded.
+    """
+    groups = {}
+    for w in (az or {}).get("words") or []:
+        if w.get("error") in ("Omission", "Insertion"):
+            continue
+        token = re.sub(r"^[^\w']+|[^\w']+$", "", (w.get("word") or "")).lower()
+        if not token:
+            continue
+        groups.setdefault(token, []).append(w)
+
+    rows = []
+    for token, ws in groups.items():
+        scores = [int(w.get("accuracy") or 0) for w in ws]
+        worst = min(ws, key=lambda w: int(w.get("accuracy") or 0))
+        rows.append({
+            "word": token,
+            "n": len(ws),
+            "worst": min(scores),
+            "mean": int(round(sum(scores) / float(len(scores)))),
+            "bad": sum(1 for s in scores if s < WEAK_BELOW),
+            "sound": _weak_sound(worst),
+            "ipa": word_ipa(token),
+            # Azure occasionally grades a spelling against the wrong reading
+            # (it hears "tied" as /t iy d/). Saying so beside the score is the
+            # difference between a drill and an hour spent fixing a sound that
+            # was never wrong.
+            "suspect": azure_lexicon_disagrees(token, worst.get("phones") or []),
+        })
+    rows.sort(key=lambda r: (r["mean"], r["worst"], -r["n"], r["word"]))
+    return rows[:limit]
+
+
+def _weakest_words_html(d):
+    """The measured word list for one report. '' when Azure never scored it."""
+    az = d.get("azure") or {}
+    rows = weakest_words(az)
+    if not rows:
+        return ""
+    scored = len([w for w in az.get("words") or []
+                  if w.get("error") not in ("Omission", "Insertion")])
+
+    trs = ""
+    for r in rows:
+        cls = " class='bad'" if r["mean"] < WEAK_BELOW else ""
+        score = "<b>%d</b>" % r["mean"]
+        if r["n"] > 1 and r["worst"] != r["mean"]:
+            score += " <span class='hint'>worst %d</span>" % r["worst"]
+        snd = r["sound"]
+        sound = ("<b>/%s/</b> <span class='hint'>%s · %d</span>"
+                 % (_esc(snd["ipa"]), snd["pos"], snd["score"])) if snd else "—"
+        if r["suspect"]:
+            sound += ("<br><span class='hint'>⚠️ Azure graded this against a "
+                      "different reading — check before drilling it</span>")
+        # word_ipa already returns its own slashes
+        ipa = (" <span class='hint'>%s</span>" % _esc(r["ipa"])) if r["ipa"] else ""
+        trs += ("<tr><td%s>%s</td>"
+                "<td><button class='btn small' data-say=\"%s\">🔊</button> "
+                "<b>%s</b>%s</td><td>%s</td>"
+                "<td class='hint'>×%d</td></tr>"
+                % (cls, score, _attr(r["word"]), _esc(r["word"]), ipa, sound,
+                   r["n"]))
+
+    # Numbers and part-words are real scores but poor practice cards — the
+    # single-word drill wants something you can look up and say again.
+    drill = [r["word"] for r in rows
+             if not r["suspect"] and re.fullmatch(r"[a-z][a-z'-]*", r["word"])]
+    btn = ""
+    if drill:
+        btn = ("<button class='btn' data-words=\"%s\" onclick='addDrillWords(this)' "
+               "style='margin-top:10px'>➕ Add these %d words to Practice</button>"
+               % (_attr(" ".join(drill)), len(drill)))
+
+    clean = ""
+    if all(r["mean"] >= WEAK_BELOW for r in rows):
+        clean = (" Nothing here fell below the %d that counts as a "
+                 "mispronunciation — these are simply your softest words in a "
+                 "clean recording." % WEAK_BELOW)
+
+    return (
+        "<div class='card'><h4>Weakest words — measured</h4>"
+        "<p class='hint'>Your %d lowest-scoring words out of %d Azure scored in "
+        "this recording, worst first. The score is the average across every time "
+        "you said it; the sound is the lowest-scoring phoneme in your weakest "
+        "attempt.%s</p>"
+        "<table><tr><th>Score</th><th>Word</th><th>Weakest sound</th>"
+        "<th>Said</th></tr>%s</table>%s</div>"
+        % (len(rows), scored, clean, trs, btn))
+
+
+#: How many recent recordings a measured pattern is drawn from. A pattern is a
+#: standing habit, so one session cannot show one -- but your whole history is
+#: the wrong window too: a sound you fixed in June is not a pattern you have
+#: today, and leaving it in the list sends you to drill something you already
+#: own.
+PATTERN_WINDOW = 12
+#: Graded instances a (sound, position) bucket needs before its mean is worth
+#: reading. Azure scores every phoneme, so this fills quickly for consonants
+#: and slowly for the rare ones -- which is the intended bias.
+PATTERN_MIN_N = 20
+#: ...and how many separate recordings it must appear in. This is the word
+#: "repeatable" turned into a number: three sessions is a habit, one bad
+#: morning is not.
+PATTERN_MIN_RECORDINGS = 3
+#: How far below its own comparison a bucket must sit to be named at all.
+#: Azure's per-phoneme scores are noisy by a point or two either way.
+PATTERN_MIN_GAP = 4.0
+#: How many patterns one report lists. Same reasoning as WEAKEST_SHOWN: a
+#: ranked five is a practice plan, twenty is the data again.
+PATTERNS_SHOWN = 5
+
+_POS_LABEL = {"initial": "at the start of a word",
+              "middle": "inside a word",
+              "final": "at the end of a word"}
+
+
+def _phone_rows(items, window=PATTERN_WINDOW):
+    """Every graded phoneme in the last `window` recordings.
+
+    One row per phoneme instance: which sound, where in the word it sat, what
+    Azure scored it, which word it was in and which recording it came from.
+    Everything below is a grouping of this list.
+
+    Omissions and insertions are dropped for the same reason `weakest_words`
+    drops them: an omitted word was never spoken, so its score describes
+    nothing you said.
+    """
+    rows = []
+    for ri, d in enumerate(list(items or [])[-window:]):
+        for w in (d.get("azure") or {}).get("words") or []:
+            if w.get("error") in ("Omission", "Insertion"):
+                continue
+            token = re.sub(r"^[^\w']+|[^\w']+$", "", (w.get("word") or "")).lower()
+            phones, pacc = w.get("phones") or [], w.get("pacc") or []
+            if not token or len(phones) != len(pacc):
+                continue
+            for i, (ph, sc) in enumerate(zip(phones, pacc)):
+                if sc is None or sc < 0:
+                    continue
+                rows.append({
+                    "arpa": _stat_phone(ph),
+                    "pos": "final" if i == len(phones) - 1 else
+                           ("initial" if i == 0 else "middle"),
+                    "score": float(sc), "word": token, "rec": ri,
+                })
+    return rows
+
+
+def _pattern_words(rows, limit=6):
+    """The words that show a pattern worst, worst first.
+
+    Grouped by word and ranked by mean, not by any single instance: a word you
+    said once and fluffed is a bad drill card, and a word that scores 60 every
+    single time is exactly the one to practise.
+    """
+    by_word = {}
+    for r in rows:
+        # Numbers and part-words carry real scores but make poor examples: you
+        # cannot look "5000" up and say it again, and the row is meant to be a
+        # drill card, not a citation.
+        if not re.fullmatch(r"[a-z][a-z'-]*", r["word"]):
+            continue
+        by_word.setdefault(r["word"], []).append(r["score"])
+    out = [(sum(v) / len(v), -len(v), w) for w, v in by_word.items()]
+    out.sort()
+    return [w for _m, _n, w in out[:limit]]
+
+
+def sound_patterns(items, window=PATTERN_WINDOW, limit=PATTERNS_SHOWN):
+    """Repeatable pronunciation patterns, measured rather than inferred.
+
+    The other half of this section reads a transcript, so it can only name a
+    sound when the recognizer visibly misheard a word -- and on a clean
+    recording it correctly reports nothing. That honesty left the section
+    saying "no repeatable pattern was visible" on every clean recording in a
+    row, which reads as "you have no patterns" when what it means is "text
+    cannot show me one".
+
+    A pattern is not in the text. It is in the phoneme scores Azure already
+    returned for every recording, and it only exists across recordings: the
+    same sound, weak in the same place, session after session.
+
+    Two shapes, because a sound can fail two ways:
+
+      * position -- the same consonant scores well inside a word and badly at
+        the end of one. This is the Mandarin-L1 signature, and stating it as a
+        gap against your OWN /t/ elsewhere is what makes it a finding rather
+        than a stereotype: the comparison is you, not a textbook.
+      * sound -- a phoneme that is weak wherever it appears, measured against
+        your own average across every phoneme you have been scored on.
+
+    A sound that fails by position is never also reported as failing overall.
+    The positional row already says where to aim, and the general one would
+    only bury it.
+    """
+    rows = _phone_rows(items, window)
+    if not rows:
+        return []
+
+    overall = sum(r["score"] for r in rows) / float(len(rows))
+
+    by_phone, by_bucket = {}, {}
+    for r in rows:
+        by_phone.setdefault(r["arpa"], []).append(r)
+        by_bucket.setdefault((r["arpa"], r["pos"]), []).append(r)
+
+    def mean(rs):
+        return sum(r["score"] for r in rs) / float(len(rs))
+
+    def ipa(arpa):
+        return _ARPA2IPA.get(arpa, arpa.lower())
+
+    out, positional = [], set()
+    for (arpa, pos), rs in by_bucket.items():
+        elsewhere = [r for r in by_phone[arpa] if r["pos"] != pos]
+        recs = set(r["rec"] for r in rs)
+        # Both sides need enough instances: a 20-point gap against four
+        # scattered samples of the same sound elsewhere is not a comparison.
+        if (len(rs) < PATTERN_MIN_N or len(elsewhere) < PATTERN_MIN_N // 2
+                or len(recs) < PATTERN_MIN_RECORDINGS):
+            continue
+        here, there = mean(rs), mean(elsewhere)
+        if there - here < PATTERN_MIN_GAP:
+            continue
+        positional.add(arpa)
+        out.append({"kind": "position", "ipa": ipa(arpa), "pos": pos,
+                    "mean": here, "compare": there, "gap": there - here,
+                    "n": len(rs), "recordings": len(recs),
+                    "words": _pattern_words(rs)})
+
+    for arpa, rs in by_phone.items():
+        if arpa in positional:
+            continue
+        recs = set(r["rec"] for r in rs)
+        if len(rs) < PATTERN_MIN_N or len(recs) < PATTERN_MIN_RECORDINGS:
+            continue
+        here = mean(rs)
+        if overall - here < PATTERN_MIN_GAP:
+            continue
+        out.append({"kind": "sound", "ipa": ipa(arpa), "pos": "",
+                    "mean": here, "compare": overall, "gap": overall - here,
+                    "n": len(rs), "recordings": len(recs),
+                    "words": _pattern_words(rs)})
+
+    out.sort(key=lambda r: (-r["gap"], -r["n"], r["ipa"]))
+    return out[:limit]
+
+
+def _sound_patterns_html(items):
+    """The measured pattern list. '' when nothing clears the thresholds."""
+    rows = sound_patterns(items)
+    if not rows:
+        return ""
+    n_recs = len([d for d in list(items or [])[-PATTERN_WINDOW:]
+                  if (d.get("azure") or {}).get("words")])
+
+    trs = ""
+    for r in rows:
+        if r["kind"] == "position":
+            what = ("<b>/%s/</b> %s" % (_esc(r["ipa"]), _POS_LABEL[r["pos"]]))
+            vs = ("%d <span class='hint'>vs %d for your /%s/ elsewhere</span>"
+                  % (round(r["mean"]), round(r["compare"]), _esc(r["ipa"])))
+        else:
+            what = "<b>/%s/</b> wherever it appears" % _esc(r["ipa"])
+            vs = ("%d <span class='hint'>vs your %d average</span>"
+                  % (round(r["mean"]), round(r["compare"])))
+        says = " ".join("<button class='btn small' data-say=\"%s\">%s</button>"
+                        % (_attr(w), _esc(w)) for w in r["words"])
+        trs += ("<tr><td class='bad'><b>-%d</b></td><td>%s</td><td>%s</td>"
+                "<td class='hint'>%d&times; · %d recordings</td></tr>"
+                "<tr><td></td><td colspan='3'>%s</td></tr>"
+                % (round(r["gap"]), what, vs, r["n"], r["recordings"], says))
+
+    drill, seen = [], set()
+    for r in rows:
+        for w in r["words"]:
+            if w not in seen and re.fullmatch(r"[a-z][a-z'-]*", w):
+                seen.add(w)
+                drill.append(w)
+    btn = ""
+    if drill:
+        btn = ("<button class='btn' data-words=\"%s\" onclick='addDrillWords(this)' "
+               "style='margin-top:10px'>&plus; Add these %d words to Practice"
+               "</button>" % (_attr(" ".join(drill)), len(drill)))
+
+    return (
+        "<div class='card'><h4>Patterns across recordings &mdash; measured</h4>"
+        "<p class='hint'>From the per-phoneme scores Azure returned for your "
+        "last %d recordings. A sound is listed only when it is weak in at least "
+        "%d of them, so this is a habit rather than one bad morning. The gap is "
+        "against <b>your own</b> speech &mdash; the same sound somewhere else in "
+        "a word, or your average across every phoneme &mdash; which is why a "
+        "pattern here means something a textbook list of Mandarin-speaker "
+        "problems does not.</p>"
+        "<table><tr><th>Gap</th><th>Sound</th><th>Scored</th><th>Seen</th></tr>"
+        "%s</table>%s</div>" % (n_recs, PATTERN_MIN_RECORDINGS, trs, btn))
+
+
 def _prosody_section(d):
     """Render the statistical Prosody meter (pitch contour + metrics + targets)."""
     pm = d.get("prosody_metrics")
@@ -1800,11 +2194,39 @@ def _prosody_section(d):
         msg = ("Natural pace" if c == GOOD else
                "Slow/hesitant" if rate < 3.5 else "Fast")
         card("Speaking rate", "%.1f/s" % rate, c, "aim 3.5–5.5 syl/s", msg)
-    if pause is not None:
+    hes = pm.get("hesitation_pct")
+    adj = pm.get("pause_ratio_adj_pct")
+    plan = pm.get("planning_pct")
+    if hes is not None:
+        # 0.6–2s gaps, measured against the recording minus thinking time. Short
+        # enough that they aren't you choosing a topic, long enough to be heard.
+        # Deliberately uncoloured: the energy threshold in analyze_prosody counts
+        # some low-energy speech as silence, so the absolute level is inflated by
+        # an unknown amount. It's consistent across recordings, so the trend is
+        # readable — a red/green verdict on the level would not be.
+        n = pm.get("pause_hesitation_n") or 0
+        card("Hesitation", "%.0f%%" % hes, "var(--mute)",
+             "0.6–2s gaps — compare to your own trend",
+             "%d gap%s while speaking" % (n, "" if n == 1 else "s"))
+    if adj is not None:
+        c = GOOD if 10 <= adj <= 35 else (WARN if adj <= 50 else BAD)
+        msg = ("Well-phrased" if c == GOOD else
+               "Few pauses — phrase more" if adj < 10 else "Choppy — long pauses")
+        card("Pause ratio", "%.0f%%" % adj, c, "aim 10–35% (thinking time excluded)", msg)
+    elif pause is not None:                       # pre-banding recordings
         c = GOOD if 10 <= pause <= 35 else (WARN if pause <= 50 else BAD)
         msg = ("Well-phrased" if c == GOOD else
                "Few pauses — phrase more" if pause < 10 else "Choppy — long pauses")
         card("Pause ratio", "%d%%" % pause, c, "aim 10–35%", msg)
+    if plan is not None:
+        # Deliberately unscored: long silences are how prepared you were for the
+        # topic, not how good your English is. Shown so it stops contaminating
+        # the two numbers above.
+        n = pm.get("pause_planning_n") or 0
+        card("Thinking time", "%.0f%%" % plan, "var(--mute)",
+             "pauses ≥2s — not scored",
+             "%d long pause%s, %s" % (n, "" if n == 1 else "s",
+                                      _fmt_dur(pm.get("pause_planning_s") or 0)))
     if npvi is not None:
         c = band(npvi, 50, 40, higher=True)
         msg = ("English-like rhythm" if c == GOOD else
@@ -1853,8 +2275,14 @@ def _prosody_section(d):
             + "<div class='metrics' style='gap:10px'>" + "".join(cards) + "</div>")
 
 
-def _report_body(d):
-    """Inner HTML (header + sections) for ONE recording — embedded in the dashboard."""
+def _report_body(d, patterns_html=""):
+    """Inner HTML (header + sections) for ONE recording — embedded in the dashboard.
+
+    `patterns_html` is the measured cross-recording pattern block. It is passed
+    in rather than computed here because it is the same for every recording on
+    the page — it describes you, not this take — and computing it per report
+    would walk every recording once per report.
+    """
     pron = ""
     for p in d.get("pronunciation_patterns", []):
         ex = ", ".join(p.get("examples", []))
@@ -1883,6 +2311,32 @@ def _report_body(d):
         pron = ("<button class='btn' data-words=\"%s\" onclick='addDrillWords(this)' "
                 "style='margin-bottom:12px'>➕ Add all %d mispronounced words to "
                 "Practice</button>" % (_attr(" ".join(all_dw)), len(all_dw))) + pron
+
+    # The patterns above are inferred from the transcript and are empty on any
+    # recording the recognizer got right — so this section used to say "no
+    # major pronunciation flags" on recordings where Azure had scored every
+    # word. The two measured blocks below are the answer to that: the weakest
+    # words in THIS recording, and the sounds that come back weak across all of
+    # them. Neither is guessed from spelling, so neither goes quiet just
+    # because the recognizer had a good day.
+    weak = _weakest_words_html(d)
+    if not pron:
+        if patterns_html:
+            # Say what the empty half actually means, and hand the reader
+            # straight to the half that did find something. The old wording
+            # stopped at "nothing visible", which reads as "you have no
+            # patterns" when it means "text cannot show me one".
+            pron = ("<p>Nothing to infer from the transcript — the recognizer "
+                    "understood every word, which is a clean result rather than "
+                    "a missing one. Patterns do not live in the text anyway; "
+                    "the measured list below is the real answer.</p>")
+        elif weak:
+            pron = ("<p>No repeatable pattern was visible in the transcript — the "
+                    "recognizer understood every word, which is a clean result "
+                    "rather than a missing one.</p>")
+        else:
+            pron = "<p>No major pronunciation flags.</p>"
+    pron += patterns_html + weak
 
     pron_diff = ""
     pd = d.get("pron_diff")
@@ -2037,7 +2491,7 @@ def _report_body(d):
         "analysis_note": analysis_note,
         "top_fixes": top_fixes,
         "blind_spots": blind_spots,
-        "pron": pron or "<p>No major pronunciation flags.</p>",
+        "pron": pron,
         "azure": azure_html,
         "pron_diff": pron_diff,
         "grammar": grammar,
@@ -2788,6 +3242,12 @@ def _sound_panel():
 
 _SKILLS_UTIL_JS = r"""
 <script>
+// How many rows a long list shows at once. Four panels page their tables — the
+// two vocabulary lists, the listening error log, the reading gap list — and they
+// all read it from here, so the page size is one edit rather than four. This
+// file defines SkillStore, which every panel captures at load, so it is
+// guaranteed to have run before any of them reads this.
+window.EC_PAGE=30;
 window.SkillStore=(function(){
  // ---- server-backed store (was localStorage-only — invisible across devices) ----
  // get()/set() must stay synchronous: every panel calls them mid-render like a
@@ -2890,8 +3350,25 @@ window.SkillStore=(function(){
  function addDays(n){var x=new Date();x.setDate(x.getDate()+n);return x.toISOString().slice(0,10);}
  function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
  function uid(){return 'x'+Math.random().toString(36).slice(2,9);}
- function schedule(srs,grade){ srs=srs||{ef:2.5,interval:1,reps:0,due:today()};
-   if(grade===0){srs.reps=0;srs.interval=1;} else {srs.reps++; srs.ef=Math.max(1.3,srs.ef+(0.1-(3-grade)*(0.08+(3-grade)*0.02))); srs.interval=srs.reps===1?1:srs.reps===2?3:Math.round(srs.interval*srs.ef);} srs.due=addDays(srs.interval); srs.last=today(); return srs; }
+ // opts.jitter spreads the DUE DATE by +/-15%. Without it, cards graded the
+ // same way on the same day get byte-identical intervals and then travel as a
+ // permanent cohort: twenty clips learned in one sitting come back as twenty
+ // clips in one sitting, forever. Two such cohorts landing on the same date is
+ // exactly how a ten-a-day habit produces a fifty-card morning, and no amount
+ // of discipline breaks them up — only noise does.
+ function schedule(srs,grade,opts){ srs=srs||{ef:2.5,interval:1,reps:0,due:today()};
+   if(grade===0){srs.reps=0;srs.interval=1;}
+   else {srs.reps++; srs.ef=Math.max(1.3,srs.ef+(0.1-(3-grade)*(0.08+(3-grade)*0.02)));
+         srs.interval=srs.reps===1?1:srs.reps===2?3:Math.round(srs.interval*srs.ef);}
+   var iv=srs.interval;
+   // The 1- and 3-day rungs stay exact — they mean "see this again very soon",
+   // and 15% of them is rounding noise that either collapses the step to today
+   // or defeats the point of having it.
+   if(opts&&opts.jitter&&iv>=4) iv=Math.max(3,Math.round(iv*(1+(Math.random()*2-1)*0.15)));
+   // Note it is `iv` that moves and `srs.interval` that is stored: jittering
+   // the stored interval would compound at every review and the ladder itself
+   // would drift away from 1/3/8/22.
+   srs.due=addDays(iv); srs.last=today(); return srs; }
  function pickVoice(){ var vs=(window.speechSynthesis.getVoices&&window.speechSynthesis.getVoices())||[];
    function f(re,local){ return vs.filter(function(v){return re.test(v.lang)&&(!local||v.localService);})[0]; }
    // prefer a LOCAL en-US voice (e.g. Samantha) — network voices often fail silently
@@ -3082,6 +3559,79 @@ _VOCAB_JS = (r"""
      tokens(clips[id]).forEach(function(w){ out[w]=1; }); });
    return out;
  }
+ // The gap list is the one table here that only ever grows: every photo adds
+ // words to the ledger and nothing removes them, so dumping it whole means a
+ // longer page and 600+ thumbnails every render. It is paged instead. The state
+ // and the data live outside coverage() so turning a page re-renders the table
+ // alone, without re-deriving the ledger or losing what you typed in the filter.
+ var GAP={page:0, per:(window.EC_PAGE||30), q:''}, GAPD=null;
+ function gapRow(w, freq){
+   var e=freq[w];
+   var thumbs=e.photos.slice(0,4).map(function(p){
+     // the photo may be gone (deleted, or its image freed) — the word stays
+     return p.live
+       ? "<img src='"+S.esc(p.img)+"' title='"+S.esc((p.scenario||'')+' · '+(p.d||''))+
+         "' style='width:38px;height:28px;object-fit:cover;border-radius:4px;cursor:pointer;margin-right:3px' "+
+         "onclick=\"VX.openPhoto('"+p.pid+"')\">"
+       : "<span title='Photo no longer stored — the word is kept' style='display:inline-block;"+
+         "width:38px;height:28px;border-radius:4px;background:#1f3542;color:var(--mut);"+
+         "font-size:14px;text-align:center;line-height:28px;margin-right:3px'>🗄</span>"; }).join('');
+   // a word can reach you without a photo — through something you wrote down
+   if(e.cap) thumbs+="<span title='Captured by hand"+(e.cap>1?" ("+e.cap+" entries)":"")+
+     "' style='display:inline-block;width:38px;height:28px;border-radius:4px;"+
+     "background:#1f3542;color:var(--mut);font-size:14px;text-align:center;line-height:28px'>✍️</span>";
+   var forms=Object.keys(e.words).filter(function(x){return x.toLowerCase()!==w;});
+   var when=e.first? ("<div class='hint'>first met "+S.esc(e.first)+"</div>") : "";
+   return "<tr><td><b>"+S.esc(w)+"</b>"+(e.n>1?" <span class='chip up'>×"+e.n+"</span>":"")+when+"</td>"+
+     "<td class='hint'>"+S.esc(forms.join(', '))+"</td><td>"+thumbs+"</td></tr>";
+ }
+ function renderGap(){
+   var el=document.getElementById('vx-gap'); if(!el || !GAPD) return;
+   var q=GAP.q.toLowerCase().trim();
+   var r=q ? GAPD.gap.filter(function(w){ return w.indexOf(q)>=0; }) : GAPD.gap;
+   var pages=Math.max(1, Math.ceil(r.length/GAP.per));
+   if(GAP.page>=pages) GAP.page=pages-1;   // a filter can strand you past the end
+   var start=GAP.page*GAP.per, view=r.slice(start, start+GAP.per);
+   var nav="<button class='btn small gpage' data-d='-1'"+(GAP.page<=0?" disabled":"")+">← prev</button>"+
+     " <button class='btn small gpage' data-d='1'"+(start+GAP.per>=r.length?" disabled":"")+">next →</button>";
+   var count="showing "+(r.length?start+1:0)+"–"+Math.min(start+GAP.per,r.length)+" of "+r.length+
+     (q?(" (filtered from "+GAPD.gap.length+")"):"")+
+     (pages>1?(" · page "+(GAP.page+1)+" of "+pages):"");
+   var bar="<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
+     "<input class='gq' placeholder='find a word…' value='"+S.esc(GAP.q)+"' style='max-width:200px'>"+
+     "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>";
+   if(!r.length){
+     el.innerHTML=bar+"<div class='card'>No word in this list matches “"+S.esc(GAP.q)+"”.</div>"; return; }
+   var rows=view.map(function(w){ return gapRow(w, GAPD.freq); }).join('');
+   // the buttons repeat below the table: after a hundred rows the ones up top
+   // are a long way back, and paging is exactly what you want next
+   el.innerHTML=bar+"<table><tr><th>Word</th><th>Seen in</th><th>Where from</th></tr>"+rows+"</table>"+
+     (pages>1?("<div style='display:flex;gap:10px;align-items:center;margin:10px 2px'>"+
+       "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>"):"");
+ }
+ // Listeners go on the container, which survives its own innerHTML being
+ // replaced on every render, so they bind once instead of per row.
+ function wireGap(){
+   var el=document.getElementById('vx-gap'); if(!el || el.__gwired) return;
+   el.__gwired=true;
+   el.addEventListener('input', function(e){
+     var t=e.target;
+     if(t && t.classList && t.classList.contains('gq')){
+       GAP.q=t.value||''; GAP.page=0; renderGap();
+       // re-rendering replaced the input the user is typing into
+       var i=el.querySelector('.gq');
+       if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+     }
+   });
+   el.addEventListener('click', function(e){
+     var p=e.target && e.target.closest ? e.target.closest('.gpage') : null;
+     if(!p || p.disabled) return;
+     GAP.page=Math.max(0, GAP.page+parseInt(p.getAttribute('data-d'),10));
+     renderGap();
+     // the next page should start at its first row, not wherever you were
+     el.scrollIntoView(true);
+   });
+ }
  function coverage(){
    syncLedger();
    var freq=surroundingFreq(), all=Object.keys(freq);
@@ -3120,31 +3670,12 @@ _VOCAB_JS = (r"""
      "still absent from your English"+
      (recurring.length?(" — "+recurring.length+(recurring.length===1?" of them has":" of them have")+
        " turned up more than once"):"")+".</p>";
-   var rows=gap.map(function(w){
-     var e=freq[w];
-     var thumbs=e.photos.slice(0,4).map(function(p){
-       // the photo may be gone (deleted, or its image freed) — the word stays
-       return p.live
-         ? "<img src='"+S.esc(p.img)+"' title='"+S.esc((p.scenario||'')+' · '+(p.d||''))+
-           "' style='width:38px;height:28px;object-fit:cover;border-radius:4px;cursor:pointer;margin-right:3px' "+
-           "onclick=\"VX.openPhoto('"+p.pid+"')\">"
-         : "<span title='Photo no longer stored — the word is kept' style='display:inline-block;"+
-           "width:38px;height:28px;border-radius:4px;background:#1f3542;color:var(--mut);"+
-           "font-size:14px;text-align:center;line-height:28px;margin-right:3px'>🗄</span>"; }).join('');
-     // a word can reach you without a photo — through something you wrote down
-     if(e.cap) thumbs+="<span title='Captured by hand"+(e.cap>1?" ("+e.cap+" entries)":"")+
-       "' style='display:inline-block;width:38px;height:28px;border-radius:4px;"+
-       "background:#1f3542;color:var(--mut);font-size:14px;text-align:center;line-height:28px'>✍️</span>";
-     var forms=Object.keys(e.words).filter(function(x){return x.toLowerCase()!==w;});
-     var when=e.first? ("<div class='hint'>first met "+S.esc(e.first)+"</div>") : "";
-     return "<tr><td><b>"+S.esc(w)+"</b>"+(e.n>1?" <span class='chip up'>×"+e.n+"</span>":"")+when+"</td>"+
-       "<td class='hint'>"+S.esc(forms.join(', '))+"</td><td>"+thumbs+"</td></tr>";
-   }).join('');
    var table=gap.length
-     ? "<table><tr><th>Word</th><th>Seen in</th><th>Where from</th></tr>"+rows+"</table>"
+     ? "<div id='vx-gap'></div>"
      : "<div class='card'>🎉 Every word your surroundings have produced has also shown up in your "+
        "speaking or your listening. Take a photo somewhere less familiar.</div>";
-   body().innerHTML=lead+stats+gapNote+table; }
+   body().innerHTML=lead+stats+gapNote+table;
+   if(gap.length){ GAPD={gap:gap, freq:freq}; wireGap(); renderGap(); } }
  function review(){ if(!items().length){body().innerHTML="<div class='card'>No words yet. Hit Capture to add your first.</div>";return;}
    var d=due(); if(!d.length){body().innerHTML="<div class='card'>🎉 All caught up — nothing due to review.</div>";return;}
    var it=d[0];
@@ -3249,6 +3780,115 @@ _VOCAB_JS = (r"""
        return "<button class='btn small' title='Put it back' onclick=\"VX.unhide('"+
          encodeURIComponent(w)+"')\">"+S.esc(w)+" ↺</button> "; }).join('')+"</div></div>";
  }
+ // Same treatment as the gap table, and for the same reason — this list only
+ // grows. It is one list paged as a whole rather than one pager per type: the
+ // groups are wildly uneven (hundreds of collocations against a handful of
+ // idioms), so per-group pagers would put a bar under headings that don't need
+ // one and still leave the big group unreadable. Headings are emitted inside
+ // the page wherever the type changes.
+ var ALL={page:0, per:(window.EC_PAGE||30), q:''}, ALLD=null;
+ function allRow(x){
+   var from = x.src==='photo'
+     ? "<img src='"+S.esc(x.img)+"' title='"+S.esc(x.scenario+' · '+(x.d||''))+
+       "' style='width:54px;height:38px;object-fit:cover;border-radius:5px;cursor:pointer' "+
+       "onclick=\"VX.openPhoto('"+x.pid+"')\">"
+     : "<span class='hint'>"+(x.srs?'reviewing':'captured')+"</span>";
+   var act = x.src==='photo'
+     ? "<button class='btn small' title='Add to your review deck' onclick=\"VX.toDeck('"+
+       encodeURIComponent(x.headword)+"')\">➕</button> "+
+       "<button class='btn small' style='background:#3a2029;color:#ff9db0' "+
+       "title='Remove from this list — the photo and the Coverage report keep it' "+
+       "onclick=\"VX.hide('"+encodeURIComponent(x.headword)+"')\">&#10005;</button>"
+     : "<button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button>";
+   var lc=(x.headword||'').toLowerCase();
+   var marked=markWord().toLowerCase()===lc;
+   act+=" <button class='btn small' title='"+(marked?'Remove this bookmark':
+       'Bookmark this row — replaces any bookmark you set earlier')+"'"+
+     (marked?" style='background:var(--accent);color:#08222b;border-color:var(--accent)'":"")+
+     " onclick=\"VX.mark('"+encodeURIComponent(x.headword)+"')\">🔖</button>";
+   return "<tr data-hw=\""+S.esc(lc)+"\"><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
+     "</td><td class='hint'>"+S.esc(x.example||'')+"</td><td>"+from+
+     "</td><td style='text-align:right;white-space:nowrap'>"+act+"</td></tr>";
+ }
+ // The rows in the order the page shows them: grouped by type, alphabetical
+ // inside each group. Flat, so a page boundary is just an index — and so the
+ // bookmark can be located by position without rendering anything.
+ function allFlat(){
+   var full=merged();
+   var a=SCFILTER==='all'?full:full.filter(function(x){return x.scenario===SCFILTER;});
+   a=a.slice().sort(function(x,y){ return x.headword.toLowerCase()<y.headword.toLowerCase()?-1:1; });
+   var by={}; a.forEach(function(x){(by[x.type||'other']=by[x.type||'other']||[]).push(x);});
+   var out=[];
+   Object.keys(by).sort().forEach(function(t){ out=out.concat(by[t]); });
+   return out;
+ }
+ function allFiltered(){
+   var q=ALL.q.toLowerCase().trim();
+   return q ? ALLD.filter(function(x){ return (x.headword||'').toLowerCase().indexOf(q)>=0; }) : ALLD;
+ }
+ function renderAllList(){
+   var el=document.getElementById('vx-all'); if(!el || !ALLD) return;
+   var q=ALL.q.toLowerCase().trim(), flat=allFiltered();
+   var pages=Math.max(1, Math.ceil(flat.length/ALL.per));
+   if(ALL.page>=pages) ALL.page=pages-1;   // deleting rows, or filtering, can strand you past the end
+   var start=ALL.page*ALL.per, view=flat.slice(start, start+ALL.per);
+   var nav="<button class='btn small apage' data-d='-1'"+(ALL.page<=0?" disabled":"")+">← prev</button>"+
+     " <button class='btn small apage' data-d='1'"+(start+ALL.per>=flat.length?" disabled":"")+">next →</button>";
+   var count="showing "+(flat.length?start+1:0)+"–"+Math.min(start+ALL.per,flat.length)+" of "+flat.length+
+     (q?(" (filtered from "+ALLD.length+")"):"")+
+     (pages>1?(" · page "+(ALL.page+1)+" of "+pages):"");
+   var bar="<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
+     "<input class='aq' placeholder='find a word…' value='"+S.esc(ALL.q)+"' style='max-width:200px'>"+
+     "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>";
+   if(!flat.length){
+     el.innerHTML=bar+"<div class='card'>No word in this list matches “"+S.esc(ALL.q)+"”.</div>"; return; }
+   // counts come off the filtered list, so a heading never promises more rows
+   // than paging through from here would actually reach
+   var counts={}; flat.forEach(function(x){ var t=x.type||'other'; counts[t]=(counts[t]||0)+1; });
+   var h='', cur=null;
+   view.forEach(function(x,i){
+     var t=x.type||'other';
+     if(t!==cur){
+       if(cur!==null) h+="</table></div>";
+       // a group can begin on an earlier page; without this the heading reads
+       // like the top of that type when you are halfway down it
+       var contd = (start+i)>0 && ((flat[start+i-1].type||'other')===t);
+       h+="<h2>"+S.esc(t)+" <span class='hint' style='font-weight:400'>"+counts[t]+
+         (contd?" · continued":"")+"</span></h2>"+
+         // Wrapped in a scroll container, not left to the bare table: the action
+         // cell is nowrap and three buttons wide (➕ ✕ 🔖), and the global
+         // `table{overflow:hidden}` rule (there for rounded corners) clips
+         // whatever doesn't fit instead of scrolling to it — the bookmark button
+         // was rendering off the right edge with no way to reach it at all.
+         "<div style='overflow-x:auto'><table style='min-width:640px'><tr><th>Word</th><th>Meaning</th>"+
+         "<th>Example</th><th>From</th><th></th></tr>";
+       cur=t;
+     }
+     h+=allRow(x);
+   });
+   if(cur!==null) h+="</table></div>";
+   el.innerHTML=bar+h+(pages>1?("<div style='display:flex;gap:10px;align-items:center;margin:10px 2px'>"+
+     "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>"):"");
+ }
+ function wireAll(){
+   var el=document.getElementById('vx-all'); if(!el || el.__awired) return;
+   el.__awired=true;
+   el.addEventListener('input', function(e){
+     var t=e.target;
+     if(t && t.classList && t.classList.contains('aq')){
+       ALL.q=t.value||''; ALL.page=0; renderAllList();
+       var i=el.querySelector('.aq');
+       if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+     }
+   });
+   el.addEventListener('click', function(e){
+     var p=e.target && e.target.closest ? e.target.closest('.apage') : null;
+     if(!p || p.disabled) return;
+     ALL.page=Math.max(0, ALL.page+parseInt(p.getAttribute('data-d'),10));
+     renderAllList();
+     el.scrollIntoView(true);
+   });
+ }
  function all(){
    var full=merged();
    if(!full.length){ body().innerHTML=hideBar()+"<div class='card'>No words yet. Hit <b>Capture</b> to add "+
@@ -3262,43 +3902,10 @@ _VOCAB_JS = (r"""
    var scBar=present.length>1 ? chips([{k:'all',label:'All scenarios',n:full.length}].concat(
        present.map(function(s){return {k:s,label:s,n:scount[s]};})), SCFILTER,'filterScenario') : "";
 
-   var a=SCFILTER==='all'?full:full.filter(function(x){return x.scenario===SCFILTER;});
-   if(!a.length){ body().innerHTML=hideBar()+scBar+"<div class='card'>Nothing matches that filter.</div>"; return; }
-   a.sort(function(x,y){ return x.headword.toLowerCase()<y.headword.toLowerCase()?-1:1; });
-   var by={}; a.forEach(function(x){(by[x.type||'other']=by[x.type||'other']||[]).push(x);});
-   var h='';
-   Object.keys(by).sort().forEach(function(t){
-     h+="<h2>"+S.esc(t)+" <span class='hint' style='font-weight:400'>"+by[t].length+"</span></h2>"+
-       // Wrapped in a scroll container, not left to the bare table: the action
-       // cell is nowrap and three buttons wide (➕ ✕ 🔖), and the global
-       // `table{overflow:hidden}` rule (there for rounded corners) clips
-       // whatever doesn't fit instead of scrolling to it — the bookmark button
-       // was rendering off the right edge with no way to reach it at all.
-       "<div style='overflow-x:auto'><table style='min-width:640px'><tr><th>Word</th><th>Meaning</th><th>Example</th><th>From</th><th></th></tr>"+
-       by[t].map(function(x){
-         var from = x.src==='photo'
-           ? "<img src='"+S.esc(x.img)+"' title='"+S.esc(x.scenario+' · '+(x.d||''))+
-             "' style='width:54px;height:38px;object-fit:cover;border-radius:5px;cursor:pointer' "+
-             "onclick=\"VX.openPhoto('"+x.pid+"')\">"
-           : "<span class='hint'>"+(x.srs?'reviewing':'captured')+"</span>";
-         var act = x.src==='photo'
-           ? "<button class='btn small' title='Add to your review deck' onclick=\"VX.toDeck('"+
-             encodeURIComponent(x.headword)+"')\">➕</button> "+
-             "<button class='btn small' style='background:#3a2029;color:#ff9db0' "+
-             "title='Remove from this list — the photo and the Coverage report keep it' "+
-             "onclick=\"VX.hide('"+encodeURIComponent(x.headword)+"')\">&#10005;</button>"
-           : "<button class='btn small' onclick='VX.del(\""+x.id+"\")'>✕</button>";
-         var lc=(x.headword||'').toLowerCase();
-         var marked=markWord().toLowerCase()===lc;
-         act+=" <button class='btn small' title='"+(marked?'Remove this bookmark':
-             'Bookmark this row — replaces any bookmark you set earlier')+"'"+
-           (marked?" style='background:var(--accent);color:#08222b;border-color:var(--accent)'":"")+
-           " onclick=\"VX.mark('"+encodeURIComponent(x.headword)+"')\">🔖</button>";
-         return "<tr data-hw=\""+S.esc(lc)+"\"><td><b>"+S.esc(x.headword)+"</b></td><td>"+S.esc(x.definition)+
-           "</td><td class='hint'>"+S.esc(x.example||'')+"</td><td>"+from+
-           "</td><td style='text-align:right;white-space:nowrap'>"+act+"</td></tr>"; }).join('')+"</table></div>";
-   });
-   body().innerHTML=markBar()+hideBar()+scBar+"<p class='hint' id='vx-allmsg'></p>"+h; }
+   ALLD=allFlat();
+   if(!ALLD.length){ body().innerHTML=hideBar()+scBar+"<div class='card'>Nothing matches that filter.</div>"; return; }
+   body().innerHTML=markBar()+hideBar()+scBar+"<p class='hint' id='vx-allmsg'></p><div id='vx-all'></div>";
+   wireAll(); renderAllList(); }
  window.VX={ flip:function(){var b=body().querySelector('.vxback'); if(b)b.style.display='block';},
    add:function(){var h=document.getElementById('vx-h').value.trim(); if(!h){document.getElementById('vx-msg').textContent='Headword required';return;}
      var it={id:S.uid(),headword:h,definition:document.getElementById('vx-d').value.trim(),example:document.getElementById('vx-e').value.trim(),type:document.getElementById('vx-t').value,register:document.getElementById('vx-r').value,scenario:document.getElementById('vx-sc').value,added:S.today(),srs:null};
@@ -3349,8 +3956,19 @@ _VOCAB_JS = (r"""
      if(!hit){ allmsg('Bookmarked word “'+m+'” isn’t in this list any more — it was removed or '+
        'deleted. Restore it, or clear the bookmark.'); return; }
      // The bookmark can sit under a scenario the current filter excludes, and
-     // scrolling to a row that was never rendered does nothing at all.
-     if(SCFILTER!=='all' && hit.scenario!==SCFILTER){ SCFILTER='all'; all(); }
+     // scrolling to a row that was never rendered does nothing at all. Now that
+     // the list is paged it can also sit on a page that isn't showing, or be
+     // filtered out by the find box — so clear what's hiding it, then work out
+     // which page it lands on and go there before scrolling.
+     if(SCFILTER!=='all' && hit.scenario!==SCFILTER) SCFILTER='all';
+     ALL.q='';
+     ALLD=allFlat();
+     var idx=-1;
+     for(var i=0;i<ALLD.length;i++){
+       if((ALLD[i].headword||'').toLowerCase()===lc){ idx=i; break; } }
+     if(idx<0){ allmsg('Could not find that row — try Restore all.'); return; }
+     ALL.page=Math.floor(idx/ALL.per);
+     all();
      allmsg('');
      if(!scrollToMark(true)) allmsg('Could not find that row — try Restore all.');
    },
@@ -3359,7 +3977,7 @@ _VOCAB_JS = (r"""
      var on=d.style.display==='none';
      d.style.display=on?'block':'none'; btn.textContent=on?'👁 Hide':'👁 Show';
    },
-   filterScenario:function(s){ SCFILTER=s; all(); },
+   filterScenario:function(s){ SCFILTER=s; ALL.page=0; all(); },
    openPhoto:function(pid){
      var a=document.querySelector("a[data-panel=photodesc]"); if(a) a.click();
      if(window.PD) window.PD.open(pid);
@@ -4343,8 +4961,11 @@ _SV = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY",
 #: Azure and CMUdict do not use the same ARPAbet. Azure emits `ax` for schwa
 #: and `dx` for a flapped t; CMUdict writes those AH0 and T. Left unfolded, the
 #: same sound is counted as two different ones and every rate is wrong.
+#: `H` is the same one: Azure writes /h/ as `h`, CMUdict as `hh`, and those are
+#: the only two symbols the two alphabets spell differently across every
+#: recording in the library.
 _SFIX = {"AX": "AH", "AXR": "ER", "IX": "IH", "UX": "UW", "DX": "T",
-         "NX": "N", "EL": "L", "EM": "M", "EN": "N", "WH": "W"}
+         "NX": "N", "EL": "L", "EM": "M", "EN": "N", "WH": "W", "H": "HH"}
 
 
 def _stat_phone(p):
@@ -5022,6 +5643,11 @@ def _norm_arpa(seq):
             p = "@" if p != "axr" else "er"
         elif p in _ARPA_LOW:
             p = "a"
+        elif p == "h":
+            # Azure spells /h/ `h`, CMUdict `hh`. Unfolded, every word starting
+            # with an h disagreed with its own dictionary entry, and "heavy"
+            # came back flagged as graded against the wrong reading.
+            p = "hh"
         out.append(p)
     # collapse any vowel + /r/ into one r-coloured slot
     folded = []
@@ -5173,20 +5799,80 @@ _DICTATION_JS = r"""
  function clips(){ return window.LISTEN_CLIPS||[]; }
  function body(){ return document.getElementById('dict-body'); }
  function srs(){ return S.get('dict_srs',{}); }
+ // --- the daily review cap -------------------------------------------------
+ // SM-2 hands back roughly 1.5 reviews per day for every card you add (1 +
+ // 1/3 + 1/8 + 1/22 + ...), so ten new clips a day settles at fifty-odd cards
+ // a day and keeps climbing. That is arithmetic, not a lapse in discipline,
+ // and an uncapped queue reports it as debt. The cap makes the day finite:
+ // anything past it simply waits, which is what a paper deck does anyway.
+ // 0 means no limit.
+ function cap(){ var v=parseInt(S.get('dict_cap',15),10); return (isNaN(v)||v<0)?15:v; }
+ function loadToday(){ var l=S.get('dict_load',{}); return (l&&l.d===S.today())?(l.rev||0):0; }
+ function bumpLoad(){ var l=S.get('dict_load',{});
+   if(!l||l.d!==S.today()) l={d:S.today(),rev:0};
+   l.rev=(l.rev||0)+1; S.set('dict_load',l); }
+ function reviewsLeft(){ var c=cap(); return c===0?Infinity:Math.max(0,c-loadToday()); }
+ // --- retirement -----------------------------------------------------------
+ // A dictation clip is not a vocabulary card. The recording is fixed: once you
+ // have written those five seconds down perfectly on two separate days, playing
+ // them a third time teaches nothing. The skill was never in this clip -- it is
+ // in the next one, and there are 800,000 of those upstream. So retiring here
+ // does not claim "you have finished learning"; it says "this particular
+ // recording has nothing left to tell you", which is a much smaller and much
+ // more defensible claim than a review queue that grows forever implies.
+ function retiredIds(){
+   if(S.get('dict_noretire',false)) return {};
+   var sc=S.get('ec_scores',{}), out={};
+   Object.keys(sc).forEach(function(k){
+     if(k.indexOf('dict:')!==0) return;
+     var h=(sc[k]||[]).filter(function(x){ return x && typeof x.s==='number'; });
+     if(h.length<2) return;
+     var a=h[h.length-1], b=h[h.length-2];
+     // Different days on purpose: twice in one sitting is short-term memory of
+     // the sentence, not of the sounds in it.
+     if(a.s>=100 && b.s>=100 && a.d!==b.d) out[k.slice(5)]=1;
+   });
+   return out;
+ }
+ // Reviews this deck will generate per day, from the deck itself: a card on a
+ // 3-day interval contributes a third of a review a day, one on 22 days a
+ // twentieth. Summed, that is the arrival rate -- the number a daily cap has to
+ // exceed or the queue behind it grows without limit. It needs no history and
+ // no guesswork, which is why the warning below can state it rather than
+ // predict it.
+ function arrivalRate(ret){
+   var st=srs(), sum=0;
+   Object.keys(st).forEach(function(k){
+     if(ret&&ret[k]) return;
+     var r=st[k]; if(!r) return;
+     sum += 1/Math.max(1, r.interval||1);
+   });
+   return sum;
+ }
  function sources(){ var s={}; clips().forEach(function(c){ s[c.source]=1; }); return Object.keys(s).sort(); }
  function offSources(){ return S.get('dict_off',[]); }
  function pool(){
    var off=offSources();
    return clips().filter(function(c){ return off.indexOf(c.source)<0; });
  }
- // pick the next clip: anything due for review first (spaced repetition),
- // otherwise something never attempted, otherwise anything at random.
+ // pick the next clip: mostly due reviews, mixed with clips never attempted.
  function pick(){
    var p=pool(); if(!p.length) return null;
-   var st=srs(), today=S.today();
-   var due=p.filter(function(c){ var r=st[c.id]; return r && r.due && r.due<=today; });
+   var st=srs(), today=S.today(), ret=retiredIds();
+   var due=p.filter(function(c){ var r=st[c.id];
+     return r && r.due && r.due<=today && !ret[c.id]; });
    var fresh=p.filter(function(c){ return !st[c.id]; });
-   var from = due.length?due : (fresh.length?fresh : p);
+   if(reviewsLeft()<=0) due=[];          // past the cap: the rest waits for tomorrow
+   var from;
+   if(due.length && fresh.length){
+     // Interleaved, not drained. Serving every due card before the first new
+     // one meant that on a heavy day you could not reach a new clip at all --
+     // the session was taken over by repetition, which is what makes a review
+     // pile feel like a punishment rather than a deck.
+     from = (Math.random()<0.7) ? due : fresh;
+   } else {
+     from = due.length?due : (fresh.length?fresh : p);
+   }
    var next = from[Math.floor(Math.random()*from.length)];
    if(from.length>1 && ST.cur && next.id===ST.cur.id) return pick();
    return next;
@@ -5200,9 +5886,10 @@ _DICTATION_JS = r"""
  }
  function stats(){
    var st=srs(), p=pool(), done=0, due=0, today=S.today();
-   var seen=practisedIds();
+   var seen=practisedIds(), ret=retiredIds(), retired=0;
    p.forEach(function(c){
      if(seen[c.id]) done++;
+     if(ret[c.id]){ retired++; return; }
      var r=st[c.id]; if(r && r.due && r.due<=today) due++;
    });
    // how much material is still sitting upstream, unimported
@@ -5212,6 +5899,9 @@ _DICTATION_JS = r"""
      if(typeof e==='number'){ avail+=e; known=true; }
    });
    return {total:p.length, done:done, fresh:p.length-done, due:due,
+           cap:cap(), left:reviewsLeft(), didToday:loadToday(),
+           retired:retired, retireOn:!S.get('dict_noretire',false),
+           rate:arrivalRate(ret),
            library:clips().length, available:known?avail:null};
  }
  function esc(s){ return S.esc(s); }
@@ -5229,10 +5919,10 @@ _DICTATION_JS = r"""
      "<span><b style='font-size:22px'>"+s.total+"</b> <span class='hint'>clips</span></span>"+
      "<span><b style='font-size:22px;color:var(--good)'>"+s.done+"</b> <span class='hint'>practised ("+pct+"%)</span></span>"+
      "<span><b style='font-size:22px'>"+s.fresh+"</b> <span class='hint'>never heard</span></span>"+
-     "<span><b style='font-size:22px;color:var(--warn)'>"+s.due+"</b> <span class='hint'>due for review</span></span>"+
+     dueChip(s)+
      "</div>"+
      "<div class='sb-t' style='height:8px;margin:0 2px 4px'><div class='sb-f' style='width:"+pct+"%'></div></div>"+
-     importBar(s);
+     capBar(s)+loadWarning(s)+importBar(s);
    var rates=[0.6,0.75,1].map(function(r){
      return "<button class='btn small dictrate"+(ST.rate===r?' active':'')+"' data-rate='"+r+"'>"+
             (r===1?'1&#215; normal':(r+'&#215;'))+"</button>"; }).join('');
@@ -5264,6 +5954,72 @@ _DICTATION_JS = r"""
    el.innerHTML=head+player+box+cite+srcBar();
    var ta=document.getElementById('dict-input');
    if(ta && !ST.checked){ ta.focus(); }
+ }
+
+ // What the counter used to say was the size of the debt: "50 due for review".
+ // That number is true and useless -- it is not a thing you were ever going to
+ // do, and reading it every morning is what makes people retire the mechanism
+ // entirely. What it says now is the size of the day.
+ function dueChip(s){
+   if(s.cap===0){
+     return "<span><b style='font-size:22px;color:var(--warn)'>"+s.due+"</b> "+
+            "<span class='hint'>due for review</span></span>";
+   }
+   var todo=Math.min(s.due, s.left), waiting=Math.max(0, s.due-todo);
+   var col=todo?'var(--warn)':'var(--good)';
+   var tail=waiting?(" <span class='hint' title='Held back by your daily cap — "+
+     "they are not overdue and nothing is lost.'>+"+waiting+" waiting</span>"):"";
+   var ret=s.retired?("<span><b style='font-size:22px;color:var(--good)'>"+s.retired+
+     "</b> <span class='hint' title='Transcribed perfectly on two separate days. "+
+     "These have left the review queue for good.'>retired</span></span>"):"";
+   return "<span><b style='font-size:22px;color:"+col+"'>"+todo+"</b> "+
+          "<span class='hint'>to review today</span>"+tail+"</span>"+ret;
+ }
+
+ function capBar(s){
+   var opts=[10,15,20,30,0].map(function(n){
+     return "<option value='"+n+"'"+(n===s.cap?" selected":"")+">"+
+            (n?(n+" reviews"):"no limit")+"</option>"; }).join('');
+   var note = s.cap
+     ? ("<b>"+s.didToday+"</b> of "+s.cap+" done today.")
+     : "No limit — every review arrives the day it falls due.";
+   var ret="<label class='hint' style='align-self:center;cursor:pointer' "+
+     "title='A clip retires once you have transcribed it perfectly on two "+
+     "separate days. Unticking this brings every retired clip straight back.'>"+
+     "<input type='checkbox' id='dict-retire'"+(s.retireOn?" checked":"")+
+     " style='vertical-align:-2px'> Retire mastered clips"+
+     (s.retired?(" (<b>"+s.retired+"</b> retired)"):"")+"</label>";
+   return "<div class='ssbtypes' style='margin:0 2px 10px;align-items:center'>"+
+     "<span class='hint' style='align-self:center'>Daily review cap: </span>"+
+     "<select id='dict-cap' style='margin:0 6px'>"+opts+"</select>"+
+     "<span class='hint'>"+note+" New clips keep coming either way.</span>"+
+     "<span style='flex:1'></span>"+ret+"</div>";
+ }
+
+ // The cap makes the DAY finite. It does nothing about whether the queue behind
+ // it grows, and a cap that quietly hides a rising backlog is worse than the
+ // fifty-card morning it replaced — at least that number was honest. So when
+ // the deck is producing more reviews per day than the cap can absorb, say so,
+ // with the arithmetic, and name the two levers that actually move it.
+ function loadWarning(s){
+   if(!s.cap) return '';
+   var rate=Math.round(s.rate);
+   if(rate<=s.cap) return '';
+   var gap=rate-s.cap;
+   return "<div class='card' style='border-left:3px solid var(--warn)'>"+
+     "<h4>Your intake is above what this cap can absorb</h4>"+
+     "<p>The clips you are already carrying come due at about <b>"+rate+
+     " a day</b>. Your cap is <b>"+s.cap+"</b>, so roughly <b>"+gap+
+     " a day</b> settle into the backlog instead of being seen. "+
+     "Nothing is lost and nothing is overdue — but the queue grows.</p>"+
+     "<p class='hint'>Two things move that number, and adding willpower is not "+
+     "one of them. <b>Fewer new clips:</b> each one you add generates about 1.5 "+
+     "reviews a day at first, falling as its interval lengthens — so a habit of "+
+     "ten a day needs a cap in the twenties before it settles. <b>Or let more "+
+     "retire:</b> a clip you have transcribed perfectly twice leaves the queue "+
+     "for good, which is the only lever that removes load rather than deferring "+
+     "it. There are "+(s.available?s.available.toLocaleString():"hundreds of thousands of")+
+     " clips upstream; you are sampling them, not working through them.</p></div>";
  }
 
  // Import more material without leaving the page. Runs the same
@@ -5417,6 +6173,17 @@ _DICTATION_JS = r"""
    if((b=t.closest('.dictgrade'))){ gradeIt(parseInt(b.getAttribute('data-g'),10)); return; }
  });
 
+ // a <select> and a checkbox never fire a click we can read the new value from
+ document.addEventListener('change', function(e){
+   var el=e.target; if(!el) return;
+   if(el.id==='dict-cap'){ S.set('dict_cap', parseInt(el.value,10)||0); }
+   else if(el.id==='dict-retire'){ S.set('dict_noretire', !el.checked); }
+   else return;
+   // Raising the cap should hand you work immediately rather than after the
+   // next grade, and lowering it should stop offering reviews just as fast.
+   ST.cur=pick(); ST.revealed=false; ST.checked=false; render();
+ });
+
  function check(){
    var c=ST.cur; if(!c) return;
    var ta=document.getElementById('dict-input'); if(!ta) return;
@@ -5470,7 +6237,13 @@ _DICTATION_JS = r"""
 
  function gradeIt(g){
    var c=ST.cur; if(!c||isNaN(g)) return;
-   var st=srs(); st[c.id]=S.schedule(st[c.id], g); S.set('dict_srs',st);
+   var st=srs();
+   // Only a clip you had already met counts against the review cap. A clip
+   // heard for the first time is new work, not a repayment, and charging the
+   // cap for it would mean a big import day silently cancelled your reviews.
+   var wasReview=!!st[c.id];
+   st[c.id]=S.schedule(st[c.id], g, {jitter:true}); S.set('dict_srs',st);
+   if(wasReview) bumpLoad();
    ST.cur=pick(); ST.revealed=false; ST.checked=false; render();
  }
 
@@ -5482,6 +6255,7 @@ _DICTATION_JS = r"""
 _LISTENLOG_JS = r"""
 (function(){
  var S=window.SkillStore; var SORT='n'; var SHOWSKIP=false;
+ var LLPAGE=0, LLPER=(window.EC_PAGE||30), LLQ='', LLQFOCUS=false;
  function errs(){ return S.get('dict_errors',{}); }
  function body(){ return document.getElementById('llog-body'); }
  // Words you've decided aren't worth chasing. Missing "the" in dictation is a
@@ -5555,7 +6329,26 @@ _LISTENLOG_JS = r"""
      return;
    }
    function hd(k,label){ return "<th class='llsort' data-s='"+k+"' style='cursor:pointer'>"+label+(SORT===k?' ▼':'')+"</th>"; }
-   var body_=r.map(function(x){
+   // Paged like the vocabulary lists: this log only grows, one row per distinct
+   // word you have ever missed. Filtering and re-sorting both send you back to
+   // the first page — the row you were looking at is somewhere else now.
+   var q=LLQ.toLowerCase().trim();
+   var fr=q ? r.filter(function(x){ return x.word.toLowerCase().indexOf(q)>=0; }) : r;
+   var pages=Math.max(1, Math.ceil(fr.length/LLPER));
+   if(LLPAGE>=pages) LLPAGE=pages-1;   // skipping words, or filtering, can strand you past the end
+   var start=LLPAGE*LLPER, view=fr.slice(start, start+LLPER);
+   var nav="<button class='btn small llpage' data-d='-1'"+(LLPAGE<=0?" disabled":"")+">← prev</button>"+
+     " <button class='btn small llpage' data-d='1'"+(start+LLPER>=fr.length?" disabled":"")+">next →</button>";
+   var count="showing "+(fr.length?start+1:0)+"–"+Math.min(start+LLPER,fr.length)+" of "+fr.length+
+     (q?(" (filtered from "+r.length+")"):"")+
+     (pages>1?(" · page "+(LLPAGE+1)+" of "+pages):"");
+   var bar="<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
+     "<input class='llq' placeholder='find a word…' value='"+S.esc(LLQ)+"' style='max-width:200px'>"+
+     "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>";
+   if(!fr.length){
+     el.innerHTML=head+bar+"<div class='card'>No missed word matches “"+S.esc(LLQ)+"”.</div>";
+     focusQ(); return; }
+   var body_=view.map(function(x){
      var col=x.n>2?'var(--bad)':x.n>1?'var(--warn)':'var(--mut)';
      var heard=x.heard.length? ("<span class='hint'>you typed: "+S.esc(x.heard.join(', '))+"</span>") : "<span class='hint'>—</span>";
      return "<tr><td><b style='font-size:15px'>"+S.esc(x.word)+"</b></td>"+
@@ -5568,14 +6361,37 @@ _LISTENLOG_JS = r"""
        "<button class='btn small llog-skip' data-skip=\""+S.esc(x.word)+
        "\" title='Skip this word — hide it from the table without losing the count'>🚫</button></td></tr>";
    }).join('');
-   el.innerHTML=head+"<table class='pwt'><tr>"+hd('word','Word')+hd('n','Missed')+
+   el.innerHTML=head+bar+"<table class='pwt'><tr>"+hd('word','Word')+hd('n','Missed')+
      "<th>Mostly</th><th>What you wrote instead</th>"+hd('last','Last')+"<th></th></tr>"+body_+"</table>"+
+     (pages>1?("<div style='display:flex;gap:10px;align-items:center;margin:10px 2px'>"+
+       "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>"):"")+
      "<p class='hint'>“Heard but never said” means you typed a word that wasn't there — usually "+
      "a linking artefact, where two words ran together and your ear inserted a third.</p>";
+   focusQ();
  }
+ // render() replaces the whole panel, including the box being typed into, so the
+ // caret has to be put back or every keystroke drops focus after the first.
+ function focusQ(){
+   if(!LLQFOCUS) return;
+   LLQFOCUS=false;
+   var i=body()&&body().querySelector('.llq');
+   if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+ }
+ document.addEventListener('input', function(ev){
+   var t=ev.target;
+   if(!t||!t.classList||!t.classList.contains('llq')) return;
+   LLQ=t.value||''; LLPAGE=0; LLQFOCUS=true; render();
+ });
  document.addEventListener('click', function(ev){
    var t=ev.target; if(!t||!t.closest) return; var b;
-   if((b=t.closest('.llsort'))){ SORT=b.getAttribute('data-s'); render(); return; }
+   if((b=t.closest('.llpage')) && !b.disabled){
+     LLPAGE=Math.max(0, LLPAGE+parseInt(b.getAttribute('data-d'),10));
+     render();
+     var tb=body()&&body().querySelector('table'); if(tb) tb.scrollIntoView(true);
+     return; }
+   // a re-sort reorders everything under you, so page 8 of the old order is
+   // not a meaningful place to still be standing
+   if((b=t.closest('.llsort'))){ SORT=b.getAttribute('data-s'); LLPAGE=0; render(); return; }
    if((b=t.closest('#llog-reset'))){
      if(!confirm('Clear the whole listening error log?\n\nThis cannot be undone.')) return;
      S.set('dict_errors',{}); render(); return; }
@@ -5816,7 +6632,41 @@ def _mandarin_panel():
 _READING_JS = r"""
 (function(){
  var S=window.SkillStore;
- function all(){ return window.READING_ITEMS||[]; }
+ // Reading material has two sources. A recording gives the polished rewrite of
+ // your own speech (server-rendered into READING_ITEMS). A saved photo gives the
+ // description the vision model wrote for it, which until now could only be read
+ // inside Describe a photo and never read aloud or scored. Both are English
+ // prose about something you have already met, which is the whole requirement
+ // for a read-aloud passage.
+ function snippet(t){ t=(t||'').trim(); var i=t.indexOf('. ');
+   var s=(i>0?t.slice(0,i):t);
+   if(s.length>52) s=s.slice(0,52).replace(/\s+\S*$/,'')+'\u2026';
+   return s; }
+ function photoReadings(){
+   return (S.get('ec_photos',[])||[]).filter(function(p){
+     return p && p.id && (p.desc||'').trim();
+   }).map(function(p){
+     var t=(p.desc||'').trim();
+     return {id:'photo:'+p.id, name:(p.scenario||'Photo')+' \u2014 '+snippet(t),
+             when:p.d||'', at:p.d||'', text:t, src:'photo',
+             img:(p.imgGone?'':(p.img||''))};
+   });
+ }
+ // Newest first, which is the order READING_ITEMS already arrives in. `at` is an
+ // ISO date (recordings carry the time too), so a string compare is the real
+ // chronology; the id tie-break keeps the order identical between calls, because
+ // render() hands out array indices that setHidden() looks up again later.
+ function all(){
+   var merged=(window.READING_ITEMS||[]).concat(photoReadings());
+   merged.sort(function(a,b){ var x=a.at||'', y=b.at||'';
+     if(x!==y) return x<y?1:-1;
+     return a.id<b.id?-1:(a.id>b.id?1:0); });
+   return merged;
+ }
+ // Which source to show. Persisted, like the 90+ filter: with 248 photos and 64
+ // recordings, "just the recordings" is a working mode, not a momentary peek.
+ function srcFilter(){ var v=S.get('reading_src','all');
+   return (v==='rec'||v==='photo')?v:'all'; }
  function body(){ return document.getElementById('reading-body'); }
  // Timed reads live in the same history list with no `s`, so every consumer of
  // it here has to drop them before doing arithmetic — a NaN best score would
@@ -5854,9 +6704,14 @@ _READING_JS = r"""
  function render(){
    var el=body(); if(!el)return;
    var full=all();
-   var hide=hideHigh(), man=hiddenMap();
-   var manCount=0, autoCount=0;
+   var hide=hideHigh(), man=hiddenMap(), src=srcFilter();
+   var manCount=0, autoCount=0, srcCount=0;
+   var nRec=0, nPhoto=0;
+   full.forEach(function(s){ if((s.src||'rec')==='photo') nPhoto++; else nRec++; });
    var list=full.map(function(s,i){return {s:s,i:i};}).filter(function(o){
+     // Source first: a passage filtered out by source is not "hidden", and
+     // counting it as such would make the hidden note lie.
+     if(src!=='all' && (o.s.src||'rec')!==src){ srcCount++; return false; }
      if(man[o.s.id]){ manCount++; return SHOWN; }
      if(!hide) return true;
      var b=bestScore('reading:'+o.s.id);
@@ -5870,17 +6725,36 @@ _READING_JS = r"""
      (hide?'☑':'☐')+" Hide passages scoring 90+</button>";
    var revealBtn=manCount?"<button class='btn small' onclick='READ.toggleShown()'>"+
      (SHOWN?'🙈 Put them back':'👁 Show hidden')+"</button>":"";
-   var controls=(full.length>1||manCount) ? "<div style='display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px;flex-wrap:wrap'>"+
+   function srcBtn(v,label,n){ var on=(src===v);
+     return "<button class='btn small' onclick=\"READ.setSrc('"+v+"')\" style='"+
+       (on?'background:var(--accent);color:#08222b;border-color:var(--accent)':'')+
+       // The count is a .hint, which is a muted grey tuned for the dark card
+       // background -- on the active button's light accent fill it all but
+       // vanishes, so the selected tab loses its number.
+       "'>"+label+" <span class='hint'"+(on?" style='color:inherit;opacity:.7'":"")+">"+n+"</span></button>"; }
+   var srcRow=(nRec&&nPhoto)?("<div style='display:flex;gap:6px;justify-content:flex-end;align-items:center;margin:0 0 8px;flex-wrap:wrap'>"+
+     "<span class='hint' style='margin-right:auto'>Where the passage came from</span>"+
+     srcBtn('all','All',full.length)+srcBtn('rec','\ud83c\udf99 Recordings',nRec)+
+     srcBtn('photo','\ud83d\uddbc Photos',nPhoto)+"</div>"):"";
+   var controls=srcRow+((full.length>1||manCount) ? "<div style='display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px;flex-wrap:wrap'>"+
      (notes.length?"<span class='hint' style='margin-right:auto'>"+notes.join(' · ')+"</span>":"")+
      revealBtn+toggleBtn+
-     "<button class='btn small' onclick='READ.expandAll(true)'>Expand all</button><button class='btn small' onclick='READ.expandAll(false)'>Collapse all</button></div>" : "";
+     "<button class='btn small' onclick='READ.expandAll(true)'>Expand all</button><button class='btn small' onclick='READ.expandAll(false)'>Collapse all</button></div>" : "");
    var cards = list.length? list.map(function(o,idx){
      var s=o.s, i=o.i;
      var key='reading:'+s.id;
      var open=idx===0;
      var off=!!man[s.id];
+     var isPhoto=(s.src||'rec')==='photo';
+     var origin=isPhoto?'described from your photo':'polished from your recording';
+     // The thumbnail is the point of a photo passage: you read the description
+     // with the thing it describes next to it. `imgGone` entries kept their text
+     // after the file was reclaimed, so there is nothing to show for those.
+     var thumb=(isPhoto&&s.img)?("<img src=\""+S.esc(s.img)+"\" alt='' loading='lazy' "+
+       "style='width:46px;height:46px;object-fit:cover;border-radius:8px;flex:none'>"):"";
      return "<div class='card reading-card' data-reading='"+i+"'"+(off?" style='opacity:.55'":"")+"><div style='display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center'>"+
-       "<div><b>"+S.esc(s.name)+"</b><div class='hint'>"+S.esc(s.when||'')+" · polished from your recording"+(off?' · hidden':'')+"</div></div><span>"+
+       "<div style='display:flex;gap:8px;align-items:center;min-width:0'>"+thumb+
+       "<div style='min-width:0'><b>"+S.esc(s.name)+"</b><div class='hint'>"+S.esc(s.when||'')+" · "+origin+(off?' · hidden':'')+"</div></div></div><span>"+
        "<button class='btn small' onclick='READ.toggle("+i+")' aria-expanded='"+(open?'true':'false')+"'>"+(open?'▾ Collapse':'▸ Expand')+"</button> "+
        "<button class='btn small' data-say=\""+S.esc(s.text)+"\">🔊 Listen</button> "+
        "<button class='btn small strec' data-key=\""+S.esc(key)+"\" data-ref=\""+S.esc(s.text)+"\">● Read &amp; score</button> "+
@@ -5894,9 +6768,13 @@ _READING_JS = r"""
        "<div class='sthist' style='margin-top:6px'>"+S.spark(key)+"</div>"+
        "<span class='stmsg hint'></span>"+
        "<p style='white-space:pre-wrap;margin-top:8px'>"+S.esc(s.text)+"</p></div></div>";
-   }).join('') : (full.length? "<div class='card'><b>Every passage is hidden.</b><p class='hint'>"+
-       (manCount&&autoCount?'Tap “Show hidden”, or untick the 90+ filter.':manCount?'Tap “Show hidden” above to bring them back.':'Untick the filter above to see them.')+
-       "</p></div>" : "<div class='card'><b>No polished readings yet.</b><p class='hint'>Analyze an uploaded recording with grammar/word-choice feedback enabled. Its polished version will appear here automatically.</p></div>");
+   }).join('') : (full.length? "<div class='card'><b>Nothing to show.</b><p class='hint'>"+
+       (srcCount&&!manCount&&!autoCount?'Nothing from that source — tap <b>All</b> above.':
+        manCount&&autoCount?'Tap “Show hidden”, or untick the 90+ filter.':
+        manCount?'Tap “Show hidden” above to bring them back.':
+        autoCount?'Untick the filter above to see them.':
+        'Widen the filters above.')+
+       "</p></div>" : "<div class='card'><b>No passages yet.</b><p class='hint'>Analyze an uploaded recording with grammar/word-choice feedback enabled, or save a photo in <b>Describe a photo</b> — the polished rewrite and the photo description both land here on their own.</p></div>");
    el.innerHTML=controls+cards;
    if(Object.keys(RUNNING).length) startTick();
  }
@@ -5959,6 +6837,7 @@ _READING_JS = r"""
      var detail=card.querySelector('.reading-detail'), btn=card.querySelector('[aria-expanded]');
      detail.style.display=open?'':'none'; btn.textContent=open?'▾ Collapse':'▸ Expand'; btn.setAttribute('aria-expanded',open?'true':'false'); }); },
    toggleHideHigh:function(){ S.set('reading_hide90', !hideHigh()); render(); },
+   setSrc:function(v){ S.set('reading_src', v); render(); },
    // update(), not set(): CACHE was hydrated at page load, so a tab left open
    // while you hid something on the phone would otherwise POST its stale map
    // and resurrect it.
@@ -5974,7 +6853,13 @@ _READING_JS = r"""
 
 
 def _reading_panel(items):
-    """Personal reading material, one polished text for each analyzed upload."""
+    """Personal reading material, one polished text for each analyzed upload.
+
+    Recordings only. The other half of the library — the description written for
+    each saved photo — lives in the browser store (`ec_photos`), so the panel's
+    own JS merges it in at render time rather than it being baked in here. That
+    also means a photo saved in this session shows up without a server restart.
+    """
     readings = []
     for i, item in enumerate(reversed(sorted(items or [], key=_sort_ts))):
         text = (item.get("polished") or "").strip()
@@ -5985,14 +6870,21 @@ def _reading_panel(items):
             "id": "%s:%s" % (item.get("date", ""), title),
             "name": title,
             "when": _when_label(item),
+            # Sort key for the merge with photo descriptions. `when` is a display
+            # label and can be a bare date or a date+time; `at` is always the
+            # ISO date, so the two sources order against each other correctly.
+            "at": item.get("date", "") or "",
+            "src": "rec",
             "text": text,
         })
     payload = json.dumps(readings, ensure_ascii=False).replace("</", "<\\/")
     return ("<section id='stories' class='tabpanel hidden'>"
             "<h1>Reading</h1>"
-            "<p class='sub'>Your personal reading library. Every passage is the polished version "
-            "of an uploaded recording: listen, read it aloud, and score the reread against that "
-            "improved version.</p>"
+            "<p class='sub'>Your personal reading library, from both directions: the polished "
+            "version of a recording you made, and the description written for a photo you saved. "
+            "Listen, read it aloud, and score the reread \u2014 the recordings measure you against "
+            "your own words made better, the photos against prose about something you were "
+            "standing in front of.</p>"
             "<div id='reading-body'></div></section>"
             "<script>window.READING_ITEMS=%s;%s</script>" % (payload, _READING_JS))
 
@@ -7213,6 +8105,214 @@ def _speaking_vocab_panel(hidden=True):
             % (cls, body, payload, overlap_js))
 
 
+# ---------------------------------------------------------------------------
+# Word families and lemmas — the same transcripts, counted in the unit the
+# published vocabulary-size figures use.
+# ---------------------------------------------------------------------------
+
+# Broadly the consensus picture from the vocabulary-acquisition literature.
+# Deliberately shown as ranges: every one of these figures depends on how the
+# study counted, which is the entire lesson of this panel.
+_VOCAB_MILESTONES = [
+    ("1 year",       "10&ndash;50",        "10&ndash;50",         "Single words, and only in context."),
+    ("2 years",      "200&ndash;300",      "200&ndash;300",       "The vocabulary explosion starts; two-word phrases."),
+    ("3 years",      "~1,000",             "~1,000",              "Past tense, negation, endless questions."),
+    ("5 years",      "4,000&ndash;5,000",  "4,000&ndash;5,000",   "Enough to be taught in."),
+    ("8 years",      "6,000&ndash;8,000",  "~10,000",             "Reading alone starts feeding vocabulary faster than speech can."),
+    ("12 years",     "10,000&ndash;12,000", "12,000&ndash;15,000", "Subject terminology: science, history."),
+    ("16&ndash;18",  "12,000&ndash;15,000", "20,000&ndash;25,000", "The baseline range of an average adult."),
+    ("20&ndash;22",  "~13,700",            "~42,000",             "Peak rate of acquisition slows."),
+    ("adult 35+",    "~16,500",            "20,000&ndash;35,000", "Nuanced and profession-specific vocabulary accumulates."),
+    ("well-read adult", "20,000+",         "30,000&ndash;52,000", "A long tail of rare and literary words."),
+]
+
+
+def _band_bar(profile):
+    """Where your running words come from: the first thousand, the second, or
+    past them. The share past 2,000 is the number that separates a fluent
+    speaker from a merely correct one."""
+    tb, fb = profile["tok_band"], profile["fam_band"]
+    tot = sum(tb.values()) or 1
+    spec = [("K1", "the first 1,000 words", "var(--good)"),
+            ("K2", "the second 1,000", "var(--accent)"),
+            ("off-list", "beyond the first 2,000", "var(--warn)"),
+            ("unknown", "names &amp; mis-hearings", "var(--mute)")]
+    seg, rows = "", ""
+    at = 0.0
+    for key, label, color in spec:
+        n = tb.get(key, 0)
+        if not n:
+            continue
+        w = 100.0 * n / tot
+        seg += ("<div style='width:%.2f%%;background:%s' title='%s — %d running words'></div>"
+                % (w, color, label, n))
+        rows += ("<tr><td><b style='color:%s'>&#9632;</b> %s</td>"
+                 "<td style='text-align:right'>%d</td>"
+                 "<td style='text-align:right'>%.1f%%</td>"
+                 "<td style='text-align:right'>%d</td></tr>"
+                 % (color, label, n, w, fb.get(key, 0)))
+        at += w
+    return ("<div style='display:flex;height:26px;border-radius:6px;overflow:hidden;"
+            "margin:14px 0 10px'>%s</div>"
+            "<table><tr><th>Where the word comes from</th><th style='text-align:right'>Running words</th>"
+            "<th style='text-align:right'>Share</th>"
+            "<th style='text-align:right'>Families</th></tr>%s</table>" % (seg, rows))
+
+
+def _family_growth_svg(rows, lx):
+    """Cumulative word families over time, reusing the speaking-vocabulary chart."""
+    seen, sessions = set(), []
+    for r in rows:
+        fams = {lx.family(w) for w in r["words"] if lx.band(w) != "unknown"}
+        before = len(seen)
+        seen |= fams
+        sessions.append({"date": r["date"], "title": r["title"],
+                         "new": len(seen) - before, "cumulative": len(seen)})
+    return _vocab_growth_svg(sessions), sessions
+
+
+def _lexdepth_panel(hidden=True):
+    """Word forms vs lemmas vs word families, and where that puts you."""
+    cls = "tabpanel hidden" if hidden else "tabpanel"
+    try:
+        # launchd starts the web app with an arbitrary working directory, so
+        # the sibling module is not importable by luck — say where it is.
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        import lexicon
+    except Exception:
+        return ("<section id='vocabdepth' class='%s'><h1>Word families &amp; lemmas</h1>"
+                "<div class='card'>lexicon.py is missing — it carries the folding "
+                "rules and the frequency bands this report is built from.</div>"
+                "</section>" % cls)
+
+    rows = load_transcripts()
+    v = speaking_vocabulary(rows)
+    if not v["tokens"]:
+        return ("<section id='vocabdepth' class='%s'><h1>Word families &amp; lemmas</h1>"
+                "<div class='card'>No transcripts yet — analyze a recording and this "
+                "report has something to count.</div></section>" % cls)
+
+    lx = lexicon.shared()
+    p = lexicon.profile(v["counts"], lx)
+    chart, sessions = _family_growth_svg(rows, lx)
+    tot = p["tokens"]
+    beyond2k = 100.0 * p["tok_band"].get("off-list", 0) / (tot or 1)
+
+    units = (
+        "<h2>Three ways to count a vocabulary, and why it matters</h2>"
+        "<p class='sub'>Every published figure for &ldquo;how many words someone "
+        "knows&rdquo; is counted in one of these units, and swapping one for another "
+        "changes the answer by more than any amount of studying will. This is the "
+        "same word list as <b>Speaking vocabulary</b>, folded down two more steps.</p>"
+        "<table>"
+        "<tr><th>Unit</th><th>What it treats as one word</th><th>Example</th>"
+        "<th style='text-align:right'>Yours</th></tr>"
+        "<tr><td><b>Word form</b></td><td>Nothing is folded &mdash; every spelling counts."
+        "</td><td><i>go, goes, going, went, goer, ongoing</i> = 6</td>"
+        "<td style='text-align:right'><b>%s</b></td></tr>"
+        "<tr><td><b>Lemma</b></td><td>Inflections fold in: plural, tense, participle, "
+        "comparative.</td><td><i>go</i> · <i>goer</i> · <i>ongoing</i> = 3</td>"
+        "<td style='text-align:right'><b>%s</b></td></tr>"
+        "<tr><td><b>Word family</b></td><td>Derivations fold in too &mdash; anything you "
+        "could work out from the root.</td><td><i>go</i> = 1</td>"
+        "<td style='text-align:right'><b>%s</b></td></tr>"
+        "</table>"
+        "<p class='sub'>Nobody memorises <i>went</i> separately from <i>go</i>, which is "
+        "why the research counts families. The gap between your form count and your "
+        "family count is not vocabulary &mdash; it is grammar you already have.</p>"
+        % ("{:,}".format(p["forms"]), "{:,}".format(p["lemmas"]),
+           "{:,}".format(p["families"])))
+
+    stats = ("<div class='metrics'>"
+             + _stat("{:,}".format(p["families"]), "word families spoken", "var(--accent)")
+             + _stat("{:,}".format(p["lemmas"]), "lemmas")
+             + _stat("{:,}".format(p["forms"]), "word forms")
+             + _stat("{:,}".format(tot), "running words in the corpus")
+             + _stat("%.1f%%" % beyond2k, "of them beyond the first 2,000",
+                     "var(--good)" if beyond2k >= 8 else "var(--warn)")
+             + _stat("{:,}".format(int(round(p["chao1"]))), "estimated productive total",
+                     "var(--mute)")
+             + "</div>")
+
+    milestones = "".join(
+        "<tr><td>%s</td><td style='text-align:right'>%s</td>"
+        "<td style='text-align:right'>%s</td><td>%s</td></tr>" % r
+        for r in _VOCAB_MILESTONES)
+
+    compare = (
+        "<h2>Against a native speaker's timeline</h2>"
+        "<p class='sub'>The figures people quote &mdash; a five-year-old has 5,000 words, "
+        "an educated adult 16,500 &mdash; are <b>receptive</b>: words recognised when heard "
+        "or read. What this page counts is <b>productive, and observed in a sample</b>: "
+        "families you actually said, in %s running words of recording. Those are two very "
+        "different quantities, and reading your %s against the 16,500 below would be "
+        "measuring yourself with the wrong ruler.</p>"
+        "<table><tr><th>Age / stage</th><th style='text-align:right'>Word families</th>"
+        "<th style='text-align:right'>Receptive words</th><th>What changes</th></tr>"
+        "%s</table>"
+        "<div class='card'><b>The honest comparison.</b> A sample can only show words you "
+        "happened to need. Record a native adult for %s words of casual talk and you would "
+        "see roughly 2,000&ndash;2,500 families out of the 16,500 they know &mdash; the "
+        "other 14,000 simply never come up. Your %s is a floor on what you can produce, not "
+        "a ceiling on what you know. The number to watch is the "
+        "<i>estimated productive total</i> at the top of this page, which reads the size "
+        "of that undercount off your own once-only words.</div>"
+        % ("{:,}".format(tot), "{:,}".format(p["families"]), milestones,
+           "{:,}".format(tot), "{:,}".format(p["families"])))
+
+    off = sorted(p["by_band"].get("off-list", []),
+                 key=lambda f: (-p["family_counts"][f], f))
+    off_often = [f for f in off if p["family_counts"][f] >= 3][:70]
+    off_once = sorted(f for f in off if p["family_counts"][f] == 1)[:70]
+    chips = lambda ws: "".join("<span class='chip'>%s</span>" % _esc(w) for w in ws)
+
+    depth = (
+        "<h2>How far down the frequency curve you reach</h2>"
+        "<p class='sub'>English is steeply front-loaded: the first 1,000 word families "
+        "cover most of everything anyone says. Vocabulary size therefore shows up not in "
+        "how many words you use but in <b>what share of your running words come from past "
+        "the common ones</b> &mdash; the slice below in orange. In relaxed native "
+        "conversation that slice is usually 6&ndash;10%%; in writing or a talk, far more.</p>"
+        "%s"
+        "<h2>Your words from beyond the first 2,000</h2>"
+        "<p class='sub'>Used three times or more &mdash; these are genuinely yours, not "
+        "one-offs.</p><div class='chips'>%s</div>"
+        "<p class='sub' style='margin-top:14px'>And the ones you reached for exactly once. "
+        "These are the edge of your range: say each of them again this month and they stop "
+        "being accidents.</p><div class='chips'>%s</div>"
+        % (_band_bar(p), chips(off_often), chips(off_once)))
+
+    growth = ("<h2>Families over time</h2>"
+              "<p class='sub'>The line is your running total of distinct families; the bars "
+              "are how many were new that session. This is the same shape as the "
+              "Speaking-vocabulary chart with the inflections taken out, so a session that "
+              "only produced new <i>tenses</i> of old words shows up here as flat.</p>%s"
+              % chart) if chart else ""
+
+    note = (
+        "<h2>How this is counted</h2>"
+        "<p class='sub'>Folding is rule-based and checked against a dictionary, so no base "
+        "word is ever invented: <i>running</i> becomes <i>run</i> only because <i>run</i> is "
+        "a word. The lemma column is near-exact. Families are a good measure and not a "
+        "precise one &mdash; English derivation is irregular, and a few percent of words land "
+        "in the wrong family in either direction. Read the trend, not the last digit.</p>"
+        "<p class='sub'>%d word forms were set aside as names or mis-hearings "
+        "(<i>Azure</i>, <i>Kimi</i>, and whatever the recogniser made of a mumble). They are "
+        "not vocabulary, and counting them would have flattered every number on this page. "
+        "The frequency bands are close approximations of the published K1/K2 lists, kept "
+        "inside the app so nothing here needs a network.</p>"
+        % p["unknown"])
+
+    body = ("<h1>Word families &amp; lemmas</h1>"
+            "<p class='sub'>Your %d recordings, counted in the unit the research uses "
+            "instead of the unit that is easy to count.</p>"
+            "%s%s%s%s%s%s"
+            % (v["recordings"], stats, units, depth, compare, growth, note))
+    return "<section id='vocabdepth' class='%s'>%s</section>" % (cls, body)
+
+
 _LISTEN_VOCAB_JS = r"""
 (function(){
  var S=window.SkillStore;
@@ -7466,6 +8566,7 @@ _READ_VOCAB_JS = r"""
  // subtraction finishes in the browser. Same source the speaking panel reads.
  var S=window.SkillStore; if(!S) return;
  var MODE='all', DONEKEY='rv_done';
+ var RVPAGE=0, RVPER=(window.EC_PAGE||30), RVQ='', RVQFOCUS=false;
  function heardWords(){
    var srs=S.get('dict_srs',{}), sc=S.get('ec_scores',{}), ids={}, heard={};
    Object.keys(srs).forEach(function(k){ ids[k]=1; });
@@ -7540,6 +8641,21 @@ _READ_VOCAB_JS = r"""
    // something studied are exactly the noise this panel was stripped down to
    // avoid; the totals belong in a sentence.
    var doneN=live.length-left;
+   // Paged like the other long lists. The sort puts studied words last, so
+   // paging forward is also working down the list in the order you want it.
+   var q=RVQ.toLowerCase().trim();
+   var fr=q ? show.filter(function(x){ return x.w.toLowerCase().indexOf(q)>=0; }) : show;
+   var pages=Math.max(1, Math.ceil(fr.length/RVPER));
+   if(RVPAGE>=pages) RVPAGE=pages-1;
+   var start=RVPAGE*RVPER, view=fr.slice(start, start+RVPER);
+   var nav="<button class='btn small rvpage' data-d='-1'"+(RVPAGE<=0?" disabled":"")+">← prev</button>"+
+     " <button class='btn small rvpage' data-d='1'"+(start+RVPER>=fr.length?" disabled":"")+">next →</button>";
+   var count="showing "+(fr.length?start+1:0)+"–"+Math.min(start+RVPER,fr.length)+" of "+fr.length+
+     (q?(" (filtered from "+show.length+")"):"")+
+     (pages>1?(" · page "+(RVPAGE+1)+" of "+pages):"");
+   var bar="<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 2px'>"+
+     "<input class='rvq' placeholder='find a word…' value='"+S.esc(RVQ)+"' style='max-width:200px'>"+
+     "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>";
    el.innerHTML=
      "<div class='metrics'>"+
        "<div class='m'><span style='color:var(--warn)'>"+left+"</span>words to study</div>"+
@@ -7551,16 +8667,36 @@ _READ_VOCAB_JS = r"""
      "<div style='display:flex;gap:8px;flex-wrap:wrap;margin:14px 2px'>"+
        tab('all','Everything',live.length)+tab('new','Genuinely new',novel.length)+
        tab('forms','Endings on words you know',forms.length)+
-     "</div>"+
-     "<div>"+show.map(card).join('')+"</div>";
+     "</div>"+bar+
+     (fr.length ? ("<div>"+view.map(card).join('')+"</div>"+
+        (pages>1?("<div style='display:flex;gap:10px;align-items:center;margin:10px 2px'>"+
+          "<span class='hint'>"+count+"</span><span style='flex:1'></span>"+nav+"</div>"):""))
+       : "<div class='card'>No word in this list matches “"+S.esc(RVQ)+"”.</div>");
+   // the box being typed into was just replaced along with everything else
+   if(RVQFOCUS){ RVQFOCUS=false;
+     var i=el.querySelector('.rvq');
+     if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
  }
  function wire(){
    var el=document.getElementById('rv-gap'); if(!el || el.__wired) return; el.__wired=true;
+   el.addEventListener('input',function(e){
+     var t=e.target;
+     if(!t||!t.classList||!t.classList.contains('rvq')) return;
+     RVQ=t.value||''; RVPAGE=0; RVQFOCUS=true; render();
+   });
    el.addEventListener('click',function(e){
+     // switching tab changes which list you are in, so page 4 of the old one
+     // has nothing to do with where you now are
      var m=e.target.closest&&e.target.closest('.rvmode');
-     if(m){ MODE=m.getAttribute('data-m'); render(); return; }
+     if(m){ MODE=m.getAttribute('data-m'); RVPAGE=0; render(); return; }
      var d=e.target.closest&&e.target.closest('.rvdone');
+     // marking studied re-sorts it to the bottom, so stay on this page rather
+     // than following the row somewhere else
      if(d){ var w=d.getAttribute('data-w'); setDone(w,!isDone(w)); render(); return; }
+     var p=e.target.closest&&e.target.closest('.rvpage');
+     if(p && !p.disabled){
+       RVPAGE=Math.max(0, RVPAGE+parseInt(p.getAttribute('data-d'),10));
+       render(); el.scrollIntoView(true); return; }
    });
  }
  window.addEventListener('load',function(){ wire(); render(); });
@@ -7945,6 +9081,8 @@ def _skill_panels(items):
             # be the thing that provides it
             + ("<script>%s</script>" % _VOCAB_BARS_JS)
             + _listening_vocab_panel() + _speaking_vocab_panel()
+            # reads the same transcripts as the speaking panel, one fold down
+            + _lexdepth_panel()
             # after the listening panel, which embeds the clip texts both of
             # these subtract against
             + _reading_vocab_panel()
@@ -8275,6 +9413,8 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     # top-level and can never be collapsed out of sight.
     nav += ("<a data-panel='vocabspeak'>🗣️ Speaking vocabulary"
             "<small>what you produce</small></a>")
+    nav += ("<a data-panel='vocabdepth'>🧬 Word families &amp; lemmas"
+            "<small>the size behind the count</small></a>")
     nav += "<a data-panel='dictation'>🎧 Listening — dictation</a>"
     nav += "<a data-panel='listenlog'>📋 Listening error log</a>"
     nav += ("<a data-panel='vocablisten'>🎧 Listening vocabulary"
@@ -8309,6 +9449,9 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
     for _i, _d in enumerate(reversed(items_sorted)):
         rec_ids.setdefault(
             (str(_d.get("date", "")), str(_d.get("title", ""))), "rec%d" % _i)
+    # Computed once for the whole page: a pattern is a property of the speaker
+    # across recordings, so every report shows the same block.
+    patterns_html = _sound_patterns_html(items_sorted)
     panels = extra_panels
     panels += ("<section id='summary' class='tabpanel%s'>"
                % ("" if active == "summary" else " hidden")
@@ -8324,7 +9467,8 @@ def generate_dashboard_html(items, history=None, extra_nav="", extra_panels="",
         when = _esc(_when_label(d))
         nav += "<a data-panel='%s'%s>%s<small>%s</small></a>" % (pid, acls(pid), title, when)
         panels += ("<section id='%s' class='tabpanel%s'>%s</section>"
-                   % (pid, "" if pid == active else " hidden", _report_body(d)))
+                   % (pid, "" if pid == active else " hidden",
+                      _report_body(d, patterns_html)))
 
     return ("<!doctype html><html lang='en'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -8484,6 +9628,7 @@ def analyze_prosody(audio_path):
     total_t = len(rms) * hop / sr
     speech_t = float(speech.sum()) * hop / sr
     pause_t = total_t - speech_t
+    bands = _pause_bands(speech, hop / sr, total_t)
 
     vf = f0[voiced]
     if vf.size < 5:
@@ -8528,8 +9673,67 @@ def analyze_prosody(audio_path):
         "npvi": int(round(npvi)) if npvi is not None else None,
         "voiced_pct": int(round(100 * voiced.sum() / max(1, speech.sum()))),
         "dur_s": round(total_t, 1),
+        "speech_s": round(speech_t, 1),
         "contour": contour,
+        **bands,
     }
+
+
+# Silence only means something once you know how long it lasted. A 120 ms gap is
+# a stop closure, a 4-second gap is the speaker deciding what to say next, and
+# lumping them into one ratio (which `pause_ratio_pct` does) measures neither.
+PAUSE_BANDS = (
+    ("micro", 0.0, 0.25),        # articulation, not pausing at all
+    ("juncture", 0.25, 0.6),     # normal phrase boundaries
+    ("hesitation", 0.6, 2.0),    # audible struggle mid-utterance
+    ("planning", 2.0, None),     # deciding what to say — a task fact, not an English one
+)
+
+
+def _pause_bands(speech, hop_s, total_t):
+    """Split the silence in a recording by how long each stretch lasted.
+
+    `speech` is the per-frame boolean speech mask, `hop_s` the frame hop in
+    seconds. Returns the per-band count and seconds, plus three headline
+    numbers that mean something on their own:
+
+      planning_pct  — share of the recording spent in pauses >= 2s. Recording
+                      hygiene (how prepared you were for the topic), not a
+                      measure of anyone's English.
+      hesitation_pct— share of the *speaking timeline* (the recording minus
+                      that planning time) spent in 0.6-2s gaps. This is the
+                      one that tracks fluency.
+      pause_ratio_adj_pct — all real pausing (juncture + hesitation) over the
+                      speaking timeline. The honest version of pause_ratio_pct:
+                      thinking time removed, sub-250ms gaps not counted as pauses.
+    """
+    runs, cur = [], 0
+    for s in speech:
+        if s:
+            if cur:
+                runs.append(cur * hop_s)
+            cur = 0
+        else:
+            cur += 1
+    if cur:
+        runs.append(cur * hop_s)
+
+    out, secs = {}, {}
+    for name, lo, hi in PAUSE_BANDS:
+        sel = [r for r in runs if r >= lo and (hi is None or r < hi)]
+        secs[name] = float(sum(sel))
+        out["pause_%s_n" % name] = len(sel)
+        out["pause_%s_s" % name] = round(secs[name], 1)
+
+    timeline = total_t - secs["planning"]          # the recording minus thinking time
+    def pct(x, denom):
+        return round(100.0 * x / denom, 1) if denom > 0 else 0.0
+
+    out["planning_pct"] = pct(secs["planning"], total_t)
+    out["hesitation_pct"] = pct(secs["hesitation"], timeline)
+    out["pause_ratio_adj_pct"] = pct(secs["juncture"] + secs["hesitation"], timeline)
+    out["timeline_s"] = round(timeline, 1)
+    return out
 
 
 # Fields attached at load time from the filesystem — never written back into
@@ -8636,6 +9840,11 @@ def _metrics_from_data(data):
             rec["pitch_var_st"] = pm["pitch_var_st"]
         if pm.get("speech_rate_syl_s") is not None:
             rec["speech_rate"] = pm["speech_rate_syl_s"]
+        # the banded pause numbers, so the trend can be read without reopening
+        # every result.json (see _pause_bands for what each one means)
+        for k in ("hesitation_pct", "pause_ratio_adj_pct", "planning_pct"):
+            if pm.get(k) is not None:
+                rec[k] = pm[k]
     az = data.get("azure")
     if az:
         rec.update({
@@ -9796,7 +11005,13 @@ DEMO_DATA = {
         "pitch_mean_hz": 126.4, "pitch_min_hz": 105.8, "pitch_max_hz": 152.4,
         "pitch_range_st": 6.3, "pitch_var_st": 2.4,
         "speech_rate_syl_s": 4.1, "pause_ratio_pct": 22, "npvi": 43,
-        "voiced_pct": 78, "dur_s": 118.0,
+        "voiced_pct": 78, "dur_s": 118.0, "speech_s": 92.0,
+        "pause_micro_n": 61, "pause_micro_s": 6.2,
+        "pause_juncture_n": 22, "pause_juncture_s": 8.4,
+        "pause_hesitation_n": 8, "pause_hesitation_s": 7.9,
+        "pause_planning_n": 1, "pause_planning_s": 3.5,
+        "planning_pct": 3.0, "hesitation_pct": 6.9,
+        "pause_ratio_adj_pct": 14.2, "timeline_s": 114.5,
         "contour": [136.6, 137.6, 143.7, 140.6, 145.0, 143.4, 139.7, 141.1, 134.1,
                     133.4, 126.1, 121.7, 119.9, 119.0, 109.9, 108.1, 109.7, 111.7,
                     109.1, 108.9, None, None, None, 122.5, 142.8, 150.3, 145.9,
